@@ -3,16 +3,42 @@
 Программа для анализа гранулометрии порошков (лазерный анализатор Fritsch ANALYSETTE 22 и обычные таблицы):
 графики распределения, сводная таблица, отчёт для руководителя.
 
-*Заготовка — полная инструкция появится в конце работы (этап 8).*
+*Полная инструкция появится в конце работы (этап 8).*
 
-## Запуск из исходников
+## Как получить PSD-Lab.exe (Windows 10/11)
+
+1. Скачайте проект: на странице репозитория на GitHub выберите ветку `claude/new-session-1tz13i`,
+   нажмите **Code → Download ZIP** и распакуйте, например, в `C:\psd-lab`.
+   (Или, если стоит Git: `git clone -b claude/new-session-1tz13i https://github.com/brlvsky/alloys_analysis C:\psd-lab`.)
+2. Если Python 3.12 ещё не установлен — в PowerShell: `winget install Python.Python.3.12`.
+3. Дважды щёлкните **`build_exe.bat`**. В первый раз он скачает библиотеки (несколько минут), соберёт программу,
+   сам проверит её и откроет папку `dist`.
+4. Готово:
+   - программа — `dist\PSD-Lab\PSD-Lab.exe`;
+   - архив для переноса на другой компьютер — `dist\PSD-Lab-1.0-win64.zip` (распаковать в любую папку, установка не нужна);
+   - в папке `examples` рядом с exe — примеры файлов прибора.
+
+**Если Windows Defender или SmartScreen ругается** — это частая ложная тревога на самодельные exe без цифровой
+подписи. Нажмите «Подробнее» → «Выполнить в любом случае».
+
+Свои настройки программа хранит в папке `PSD-Lab-data` рядом с exe (если туда нельзя писать — в `%APPDATA%\PSD-Lab`).
+
+## Запуск без окна
+
+```
+PSD-Lab.exe --batch C:\папка\с\файлами --out C:\папка\для\результатов
+```
+Создаёт графики PNG, `summary.xlsx`, `report.html` и `batch_log.txt`.
+
+## Запуск из исходников (для разработки)
 
 ```
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 .venv\Scripts\python -m psd_lab                              (окно программы)
-.venv\Scripts\python -m psd_lab --batch data\raw --out out   (без окна: графики + summary.xlsx + report.html)
+.venv\Scripts\python -m psd_lab --batch data\raw --out out   (без окна)
 .venv\Scripts\python -m psd_lab --selftest                   (самопроверка окна, скриншоты в out\screens)
+.venv\Scripts\python -m pytest                               (тесты)
 ```
 
 Исходные файлы кладите в `data\raw\` — программа их никогда не изменяет.

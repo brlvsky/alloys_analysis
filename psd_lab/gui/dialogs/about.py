@@ -10,17 +10,16 @@ from ..widgets import Dialog
 
 
 def library_versions() -> str:
-    import matplotlib
-    import numpy
-    import openpyxl
-    import pandas
-    import PIL
-    import scipy
-    import xlrd
+    import importlib
 
-    libs = [("numpy", numpy), ("scipy", scipy), ("pandas", pandas), ("matplotlib", matplotlib),
-            ("xlrd", xlrd), ("openpyxl", openpyxl), ("Pillow", PIL)]
-    return ", ".join(f"{n} {getattr(m, '__version__', '?')}" for n, m in libs)
+    out = []
+    for name, mod in (("numpy", "numpy"), ("scipy", "scipy"), ("matplotlib", "matplotlib"),
+                      ("xlrd", "xlrd"), ("openpyxl", "openpyxl"), ("Pillow", "PIL")):
+        try:
+            out.append(f"{name} {importlib.import_module(mod).__version__}")
+        except Exception:  # noqa: BLE001 — модуль может быть исключён из сборки
+            pass
+    return ", ".join(out)
 
 
 class AboutDialog(Dialog):

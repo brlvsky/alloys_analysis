@@ -44,7 +44,17 @@ def main(argv=None) -> int:
             st.lang = args.lang
         st.bin_um, st.xmax = args.bin, args.xmax
         st.average = not args.no_average
-        res = run_batch(Path(args.batch), Path(args.out or "out"), st)
+        out = Path(args.out or "out")
+        lines = []
+
+        def log(msg):
+            # у exe без консоли print не виден — журнал дублируется в out/batch_log.txt
+            print(msg)
+            lines.append(msg)
+
+        res = run_batch(Path(args.batch), out, st, log=log)
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "batch_log.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
         return 0 if res.samples else 1
 
     from .gui.main_window import run_gui

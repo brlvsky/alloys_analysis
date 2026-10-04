@@ -788,14 +788,25 @@ def grab(win: tk.Misc, path: Path) -> Path:
 def run_selftest(win: MainWindow, out: Path, splash_shot: Path | None) -> int:
     root = win.root
     shots = [splash_shot] if splash_shot else []
+    lines = []
+
+    def say(msg):
+        # у exe без консоли print никуда не пишет — поэтому дублируем в out/screens/selftest.txt
+        print(msg)
+        lines.append(msg)
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "selftest.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    # примеры: data/raw при запуске из исходников, папка examples рядом с exe
     raw = next((p for p in (Path.cwd() / "data" / "raw", app_base_dir() / "data" / "raw",
-                            resource_dir() / "data" / "raw") if p.is_dir()), None)
+                            app_base_dir() / "examples", resource_dir() / "data" / "raw") if p.is_dir()), None)
     if raw is None:
-        print("SELFTEST: папка data/raw не найдена", file=sys.stderr)
+        say("SELFTEST: ОШИБКА — не найдена папка с примерами (data/raw или examples)")
         return 1
+    say(f"SELFTEST: {APP_NAME} {__version__}, папка примеров: {raw}")
     win.load_paths([raw])
     n = len(win.all_samples())
-    print(f"SELFTEST: загружено образцов: {n}")
+    say(f"SELFTEST: загружено образцов: {n}")
     # выбрать бимодальный образец, если он есть — на нём лучше видно графики
     for sid, s in win.items.items():
         if s.name == "П/С +0,5Y2O3":
@@ -816,9 +827,9 @@ def run_selftest(win: MainWindow, out: Path, splash_shot: Path | None) -> int:
         shots.append(grab(d, out / f"dlg_{name}.png"))
         d.destroy()
     for p in shots:
-        print(f"SELFTEST: скриншот {p}")
+        say(f"SELFTEST: скриншот {p}")
     ok = n > 0
-    print("SELFTEST: OK" if ok else "SELFTEST: ОШИБКА — нет образцов")
+    say("SELFTEST: OK" if ok else "SELFTEST: ОШИБКА — нет образцов")
     return 0 if ok else 1
 
 
@@ -856,7 +867,11 @@ def run_gui(files=None, selftest=False, out=None) -> int:
             try:
                 code["rc"] = run_selftest(win, out_dir, shot)
             except Exception:  # noqa: BLE001
-                traceback.print_exc()
+                if sys.stderr:  # у exe без консоли stderr = None
+                    traceback.print_exc()
+                out_dir.mkdir(parents=True, exist_ok=True)
+                with open(out_dir / "selftest.txt", "a", encoding="utf-8") as fh:
+                    fh.write("SELFTEST: ОШИБКА\n" + traceback.format_exc())
                 code["rc"] = 1
             root.destroy()
 
