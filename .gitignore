@@ -1,5 +1,9 @@
 .venv/
+build/
+dist/
 out/
 __pycache__/
 *.sqlite
+PSD-Lab-data/
 .pytest_cache/
+*.spec

@@ -4,10 +4,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from psd_toolkit import load
-from psd_toolkit.metrics import average_repeats
-from psd_toolkit.model import Sample
-from psd_toolkit.plots import binned, nice_ceil, plot_all
+from psd_lab.core import load
+from psd_lab.core.metrics import average_repeats
+from psd_lab.core.model import Sample
+from psd_lab.core.plots import binned, nice_ceil, plot_all
 
 RAW = Path(__file__).resolve().parent.parent / "data" / "raw"
 
@@ -42,4 +42,4 @@ def test_plot_all(tmp_path):
     assert len(made) == 13  # 12 образцов + compare.png
     assert (tmp_path / "compare.png").exists()
     assert (tmp_path / "Расчет" / "6ч.png").exists()
-    assert all(p.stat().st_size > 10_000 for p in made)
+    assert all(p.stat().st_size > 10_000 for _, p in made)

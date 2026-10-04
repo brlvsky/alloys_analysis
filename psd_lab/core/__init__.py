@@ -1,9 +1,7 @@
-"""PSD toolkit — обработка гранулометрии порошков."""
+"""Ядро PSD-Lab: чтение файлов, метрики, графики, отчёты. Не зависит от GUI."""
 from __future__ import annotations
 
 from pathlib import Path
-
-__version__ = "0.1.0"
 
 SUPPORTED = (".xls", ".xlsx", ".xlsm", ".csv", ".txt", ".tsv", ".dat")
 
@@ -15,7 +13,7 @@ def load(path) -> list:
     """
     from .io_fritsch import load_fritsch
     from .io_table import load_table
-    from .metrics import check_quality
+    from .metrics import check_file, check_quality
 
     path = Path(path)
     samples = []
@@ -25,6 +23,7 @@ def load(path) -> list:
         samples = load_table(path)
     for s in samples:
         check_quality(s)
+    check_file(samples)
     return samples
 
 

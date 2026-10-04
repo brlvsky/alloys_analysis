@@ -1,16 +1,17 @@
-# PSD toolkit
+# PSD-Lab
 
-Инструмент для обработки гранулометрии порошков (лазерная дифракция): графики, сводная таблица, отчёт, база «структура — свойства».
+Программа для анализа гранулометрии порошков (лазерный анализатор Fritsch ANALYSETTE 22 и обычные таблицы):
+графики распределения, сводная таблица, отчёт для руководителя.
 
-*Заготовка. Полная инструкция появится после этапа 3.*
+*Заготовка — полная инструкция появится в конце работы (этап 8).*
 
-## Быстрый старт (для разработки)
+## Запуск из исходников
 
 ```
 python -m venv .venv
-.venv/bin/pip install -r requirements.txt      # Windows: .venv\Scripts\pip ...
-.venv/bin/python -m psd_toolkit --help
-.venv/bin/pytest
+.venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\python -m psd_lab                              (окно программы)
+.venv\Scripts\python -m psd_lab --batch data\raw --out out   (без окна: графики + summary.xlsx + report.html)
 ```
 
-Исходные файлы кладите в `data/raw/` (их программа никогда не изменяет).
+Исходные файлы кладите в `data\raw\` — программа их никогда не изменяет.

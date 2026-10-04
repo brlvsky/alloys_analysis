@@ -5,7 +5,7 @@ from collections import OrderedDict
 
 import numpy as np
 
-from .model import ERROR, WARN, Sample
+from .model import ERROR, INFO, WARN, Sample
 
 # Окна долей по умолчанию, мкм: (нижняя, верхняя); None — без границы.
 DEFAULT_WINDOWS = [(None, 15), (15, 45), (15, 53), (45, 105), (53, None)]
@@ -14,6 +14,7 @@ D32_FIRST_LOWER_UM = 0.08  # нижняя граница диапазона пр
 OBSCURATION_MAX = 40.0
 CURVE_END_TOL = 0.6
 REPEAT_TOL = 2.0
+TRADEOFF_RATIO = 5.0
 
 
 def cum_at(s: Sample, x: float) -> float:
@@ -90,14 +91,28 @@ def check_quality(s: Sample) -> None:
     obs = s.meta.get("obscuration")
     if obs is not None:
         if obs < 0:
-            s.add_flag(ERROR, f"Отрицательная обскурация ({obs:g} %): фон записан неверно, результат ненадёжен")
+            s.add_flag(ERROR, f"Обскурация {obs:g} % < 0: фон записан неверно, результат ненадёжен")
         elif obs > OBSCURATION_MAX:
             s.add_flag(WARN, f"Обскурация {obs:g} % > {OBSCURATION_MAX:g} %: риск многократного рассеяния")
     end = s.cum_pct[-1]
     if abs(end - 100.0) > CURVE_END_TOL:
-        s.add_flag(WARN, f"Кривая заканчивается на {end:.1f} %, а не на 100 % (не перенормировано)")
+        s.add_flag(WARN, f"Кривая не доходит до 100 %: последняя точка {end:.1f} % (не перенормировано)")
     if np.any(np.diff(s.cum_pct) < -1e-9):
-        s.add_flag(ERROR, "Накопленная кривая не монотонна")
+        s.add_flag(ERROR, "Накопленная кривая не монотонна: данные повреждены или сдвинуты")
+
+
+def check_file(samples: list[Sample]) -> None:
+    """Флаги, зависящие от всех измерений файла: разный TradeOff (сглаживание)."""
+    vals = [s.meta.get("tradeoff") for s in samples]
+    vals = [v for v in vals if isinstance(v, (int, float)) and v > 0]
+    if len(vals) < 2:
+        return
+    ratio = max(vals) / min(vals)
+    if ratio > TRADEOFF_RATIO:
+        text = (f"TradeOff в файле различается в {ratio:.0f} раз ({min(vals):.0f}…{max(vals):.0f}): "
+                "степень сглаживания разная, форму пиков сравнивать осторожно")
+        for s in samples:
+            s.add_flag(INFO, text)
 
 
 # ---------------------------------------------------------------- усреднение повторов

@@ -9,14 +9,11 @@ import re
 from pathlib import Path
 
 import matplotlib
+import matplotlib.ticker
+import numpy as np
 
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-import matplotlib.ticker  # noqa: E402
-import numpy as np  # noqa: E402
-
-from .metrics import d_at  # noqa: E402
-from .model import Sample  # noqa: E402
+from .metrics import d_at
+from .model import Sample
 
 BAR_COLOR = "#b0b0b0"
 GRID_COLOR = "#aaaaaa"
@@ -29,7 +26,7 @@ TEXT = {
     "ru": {"x": "Размер, мкм", "q": "Q, %", "cum": "ΣQ, %", "step": "шаг {w:g} мкм"},
 }
 
-plt.rcParams["font.family"] = "DejaVu Sans"
+matplotlib.rcParams["font.family"] = "DejaVu Sans"
 
 
 # ---------------------------------------------------------------- вспомогательное
@@ -78,16 +75,28 @@ def safe_filename(name: str) -> str:
 
 
 # ---------------------------------------------------------------- один образец
-def plot_sample(s: Sample, path: Path, *, lang="en", bin_um=None, xmax=None, ymax=None,
-                show_name=True) -> Path:
+def new_figure(dpi=200):
+    """Фигура публикационного стиля 10×6 дюймов, белый фон (без pyplot — годится и для GUI)."""
+    from matplotlib.figure import Figure
+
+    fig = Figure(figsize=(10, 6), dpi=dpi)
+    fig.patch.set_facecolor("white")
+    return fig
+
+
+def draw_sample(fig, s: Sample, *, lang="en", bin_um=None, xmax=None, ymax=None, show_name=True,
+                font_scale=1.0):
+    """Рисует на фигуре столбики Q, % и кривую ΣQ, %. Возвращает (ax, ax2)."""
     t = TEXT[lang]
     width = bin_um or grid_step(s)
     edges, q = binned(s, width)
     xmax = xmax or x_limit(s)
     ymax = ymax or nice_ceil(q[edges[1:] <= xmax + width].max() * 1.1 if len(q) else 1)
+    fs = 12 * font_scale
 
-    fig, ax = plt.subplots(figsize=(10, 6), dpi=200)
-    fig.patch.set_facecolor("white")
+    fig.clear()
+    ax = fig.add_subplot(111)
+    ax.set_facecolor("white")
     ax.bar(edges[:-1], q, width=width, align="edge", color=BAR_COLOR, edgecolor="black",
            linewidth=0.6, zorder=2)
     ax.set_xlim(0, xmax)
@@ -100,18 +109,31 @@ def plot_sample(s: Sample, path: Path, *, lang="en", bin_um=None, xmax=None, yma
     ax2.set_ylim(0, 100)
 
     q_label = t["q"] if abs(width - 1) < 1e-9 else f"{t['q']} ({t['step'].format(w=width)})"
-    ax.set_xlabel(t["x"], fontstyle="italic", fontsize=12)
-    ax.set_ylabel(q_label, fontstyle="italic", fontsize=12)
-    ax2.set_ylabel(t["cum"], fontstyle="italic", fontsize=12)
+    ax.set_xlabel(t["x"], fontstyle="italic", fontsize=fs)
+    ax.set_ylabel(q_label, fontstyle="italic", fontsize=fs)
+    ax2.set_ylabel(t["cum"], fontstyle="italic", fontsize=fs)
+    ax.tick_params(labelsize=fs * 0.85)
+    ax2.tick_params(labelsize=fs * 0.85)
     if show_name:
-        ax.text(0.97, 0.80, s.name, transform=ax.transAxes, ha="right", va="top", fontsize=13,
+        ax.text(0.97, 0.80, s.name, transform=ax.transAxes, ha="right", va="top", fontsize=fs * 1.08,
                 bbox=dict(boxstyle="square,pad=0.4", facecolor="white", edgecolor="black", linewidth=0.8),
                 zorder=5)
     fig.tight_layout()
+    return ax, ax2
+
+
+def plot_sample(s: Sample, path: Path, *, lang="en", bin_um=None, xmax=None, ymax=None,
+                show_name=True) -> Path:
+    """Сохраняет график образца в PNG (публикационный стиль)."""
+    fig = new_figure()
+    draw_sample(fig, s, lang=lang, bin_um=bin_um, xmax=xmax, ymax=ymax, show_name=show_name)
+    return _save(fig, path)
+
+
+def _save(fig, path) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, facecolor="white")
-    plt.close(fig)
     return path
 
 
@@ -129,12 +151,16 @@ def common_axes(samples: list[Sample], bin_um=None, xmax=None):
 
 
 # ---------------------------------------------------------------- сравнение
-def plot_compare(groups: list[list[Sample]], path: Path, *, lang="en", log_x=True, xmax=None) -> Path:
-    """Накопленные кривые всех образцов. Цвет — номер образца в файле, тип линии — файл."""
+def draw_compare(fig, groups: list[list[Sample]], *, lang="en", log_x=True, xmax=None, font_scale=1.0):
+    """Накопленные кривые. Цвет — номер образца в группе (файле), тип линии — группа."""
     t = TEXT[lang]
-    fig, ax = plt.subplots(figsize=(10, 6), dpi=200)
-    fig.patch.set_facecolor("white")
+    fs = 12 * font_scale
+    fig.clear()
+    ax = fig.add_subplot(111)
     all_s = [s for g in groups for s in g]
+    if not all_s:
+        ax.text(0.5, 0.5, "Нет выбранных образцов", ha="center", va="center", transform=ax.transAxes)
+        return ax
     xm = xmax or max(x_limit(s) for s in all_s)
     for gi, grp in enumerate(groups):
         ls = LINESTYLES[gi % len(LINESTYLES)]
@@ -153,21 +179,27 @@ def plot_compare(groups: list[list[Sample]], path: Path, *, lang="en", log_x=Tru
         ax.set_xlim(0, xm)
     ax.set_ylim(0, 100)
     ax.grid(True, which="major", linestyle="--", color=GRID_COLOR, linewidth=0.6)
-    ax.set_xlabel(t["x"], fontstyle="italic", fontsize=12)
-    ax.set_ylabel(t["cum"], fontstyle="italic", fontsize=12)
-    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), frameon=False, fontsize=9)
+    ax.set_xlabel(t["x"], fontstyle="italic", fontsize=fs)
+    ax.set_ylabel(t["cum"], fontstyle="italic", fontsize=fs)
+    ax.tick_params(labelsize=fs * 0.85)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), frameon=False, fontsize=9 * font_scale)
     fig.tight_layout()
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path, facecolor="white")
-    plt.close(fig)
-    return path
+    return ax
+
+
+def plot_compare(groups: list[list[Sample]], path: Path, *, lang="en", log_x=True, xmax=None) -> Path:
+    fig = new_figure()
+    draw_compare(fig, groups, lang=lang, log_x=log_x, xmax=xmax)
+    return _save(fig, path)
 
 
 # ---------------------------------------------------------------- всё сразу
 def plot_all(file_groups: list[tuple[Path, list[Sample]]], out: Path, *, lang="en", bin_um=None,
-             xmax=None, independent_axes=False, show_name=True, log_x=True) -> list[Path]:
-    """PNG по каждому образцу (в подпапке с именем файла) + compare.png."""
+             xmax=None, independent_axes=False, show_name=True, log_x=True) -> list[tuple]:
+    """PNG по каждому образцу (в подпапке с именем файла) + compare.png.
+
+    Возвращает [(образец или None для compare.png, путь)].
+    """
     out = Path(out)
     made = []
     for file, samples in file_groups:
@@ -179,9 +211,9 @@ def plot_all(file_groups: list[tuple[Path, list[Sample]]], out: Path, *, lang="e
         for s in samples:
             base = safe_filename(s.label if s.name in used else s.name)
             used.add(s.name)
-            made.append(plot_sample(s, folder / f"{base}.png", lang=lang, bin_um=bin_um,
-                                    xmax=xmax or shared[0], ymax=shared[1], show_name=show_name))
+            made.append((s, plot_sample(s, folder / f"{base}.png", lang=lang, bin_um=bin_um,
+                                        xmax=xmax or shared[0], ymax=shared[1], show_name=show_name)))
     groups = [g for _, g in file_groups if g]
     if groups:
-        made.append(plot_compare(groups, out / "compare.png", lang=lang, log_x=log_x, xmax=xmax))
+        made.append((None, plot_compare(groups, out / "compare.png", lang=lang, log_x=log_x, xmax=xmax)))
     return made

@@ -6,10 +6,10 @@ import numpy as np
 import pytest
 from scipy.stats import norm
 
-from psd_toolkit import load
-from psd_toolkit.io_table import load_table
-from psd_toolkit.metrics import average_repeats, compute, d43
-from psd_toolkit.model import ERROR, WARN, Sample
+from psd_lab.core import load
+from psd_lab.core.io_table import load_table
+from psd_lab.core.metrics import average_repeats, compute, d43
+from psd_lab.core.model import ERROR, INFO, WARN, Sample
 
 RAW = Path(__file__).resolve().parent.parent / "data" / "raw"
 NC, TANMB, CALC = RAW / "N_C_.xls", RAW / "TANMB_.xls", RAW / "Расчет.xlsx"
@@ -57,7 +57,10 @@ def test_flags(raw):
     for mid in ("M4251", "M4253", "M4322"):
         assert any(lvl == ERROR for lvl, _ in by_id(allm, mid).flags)
     assert any(lvl == WARN for lvl, _ in by_id(allm, "M4347").flags)
-    assert by_id(allm, "M4246").flags == []
+    assert [lvl for lvl, _ in by_id(allm, "M4246").flags] == [INFO]  # только TradeOff файла
+    # TradeOff: в N_C_.xls различается в ~41 раз (флаг ИНФО), в TANMB_.xls — в 4,9 раза (флага нет)
+    assert all(any(lvl == INFO and "TradeOff" in t for lvl, t in s.flags) for s in raw[NC.name])
+    assert not any("TradeOff" in t for s in raw[TANMB.name] for _, t in s.flags)
 
 
 def test_d43_matches_instrument(raw):
@@ -117,7 +120,7 @@ def test_no_renormalisation():
     m = compute(s)
     assert m["fractions"][">53"] == pytest.approx(21.6)
     assert any(lvl == WARN for lvl, _ in s.flags) is False  # флаги ставит load()/check_quality
-    from psd_toolkit.metrics import check_quality
+    from psd_lab.core.metrics import check_quality
     check_quality(s)
     assert any("78.4" in t for _, t in s.flags)
 

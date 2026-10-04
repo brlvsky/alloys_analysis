@@ -3,12 +3,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 
 ERROR = "ERROR"
 WARN = "WARN"
 INFO = "INFO"
+LEVEL_NAMES = {ERROR: "ОШИБКА", WARN: "ВНИМАНИЕ", INFO: "ИНФО"}
+LEVEL_ORDER = {ERROR: 0, WARN: 1, INFO: 2}
+
+
+class Flag(NamedTuple):
+    """Флаг качества: уровень (ERROR/WARN/INFO) и текст для пользователя."""
+
+    level: str
+    text: str
+
+    @property
+    def level_name(self) -> str:
+        return LEVEL_NAMES.get(self.level, self.level)
 
 
 @dataclass
@@ -27,7 +41,7 @@ class Sample:
     file: str = ""
     sheet: str = ""
     meta: dict = field(default_factory=dict)
-    flags: list[tuple[str, str]] = field(default_factory=list)
+    flags: list[Flag] = field(default_factory=list)
     source: str = "table"  # "fritsch" | "table"
     members: list[str] = field(default_factory=list)  # id измерений, если это среднее повторов
 
@@ -49,4 +63,15 @@ class Sample:
 
     def add_flag(self, level: str, text: str) -> None:
         if (level, text) not in self.flags:
-            self.flags.append((level, text))
+            self.flags.append(Flag(level, text))
+
+    @property
+    def worst_level(self) -> str | None:
+        """Самый серьёзный уровень флага (для иконки) или None."""
+        if not self.flags:
+            return None
+        return min((f[0] for f in self.flags), key=lambda lv: LEVEL_ORDER.get(lv, 9))
+
+
+# Одно измерение прибора и образец (в т.ч. среднее повторов) описываются одним классом.
+Measurement = Sample
