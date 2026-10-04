@@ -12,6 +12,7 @@ python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 .venv\Scripts\python -m psd_lab                              (окно программы)
 .venv\Scripts\python -m psd_lab --batch data\raw --out out   (без окна: графики + summary.xlsx + report.html)
+.venv\Scripts\python -m psd_lab --selftest                   (самопроверка окна, скриншоты в out\screens)
 ```
 
 Исходные файлы кладите в `data\raw\` — программа их никогда не изменяет.
