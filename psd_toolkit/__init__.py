@@ -30,8 +30,13 @@ def load(path) -> list:
 
 def expand_paths(paths) -> list[Path]:
     """Файлы и папки → список поддерживаемых файлов (временные файлы Excel ~$ пропускаются)."""
+    import glob
+
     out = []
     for p in paths:
+        if any(ch in str(p) for ch in "*?[") and not Path(p).exists():  # Windows не раскрывает маски
+            out.extend(Path(m) for m in sorted(glob.glob(str(p))) if Path(m).is_file())
+            continue
         p = Path(p)
         if p.is_dir():
             out.extend(sorted(f for f in p.iterdir() if f.is_file() and f.suffix.lower() in SUPPORTED

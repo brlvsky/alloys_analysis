@@ -1,6 +1,7 @@
 """Командная строка: python -m psd_toolkit ..."""
 import argparse
 import sys
+from pathlib import Path
 
 from . import __version__, expand_paths, load
 
@@ -33,6 +34,26 @@ def cmd_metrics(args) -> int:
     return 0
 
 
+def cmd_plot(args) -> int:
+    from .metrics import average_repeats
+    from .plots import plot_all
+
+    files = expand_paths(args.paths)
+    if not files:
+        print("Не найдено ни одного файла.", file=sys.stderr)
+        return 1
+    groups = []
+    for f in files:
+        samples = load(f)
+        groups.append((f, average_repeats(samples) if args.average else samples))
+    made = plot_all(groups, Path(args.out), lang=args.lang, bin_um=args.bin, xmax=args.xmax,
+                    independent_axes=args.independent_axes, show_name=args.name, log_x=not args.linear)
+    for p in made:
+        print(p)
+    print(f"Готово: {len(made)} графиков в {args.out}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="psd_toolkit",
@@ -46,6 +67,20 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--average", action=argparse.BooleanOptionalAction, default=True,
                    help="усреднять повторы с одинаковым названием (по умолчанию да)")
     m.set_defaults(func=cmd_metrics)
+
+    g = sub.add_parser("plot", help="графики по каждому образцу + compare.png")
+    g.add_argument("paths", nargs="+", help="файлы или папки (например data/raw)")
+    g.add_argument("--out", default="out", help="папка для картинок (по умолчанию out)")
+    g.add_argument("--lang", choices=["en", "ru"], default="en", help="язык подписей осей")
+    g.add_argument("--bin", type=float, default=None, help="ширина столбика, мкм (по умолчанию шаг сетки)")
+    g.add_argument("--xmax", type=float, default=None, help="предел оси X, мкм")
+    g.add_argument("--average", action=argparse.BooleanOptionalAction, default=True,
+                   help="усреднять повторы (по умолчанию да)")
+    g.add_argument("--independent-axes", action="store_true", help="свои оси у каждого образца")
+    g.add_argument("--name", action=argparse.BooleanOptionalAction, default=True,
+                   help="название образца в рамке")
+    g.add_argument("--linear", action="store_true", help="линейная ось X на сравнительном графике")
+    g.set_defaults(func=cmd_plot)
     return p
 
 
