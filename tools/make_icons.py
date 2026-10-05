@@ -39,6 +39,71 @@ def glyph(d, rows, x0, y0, c):
                 d.point((x0 + i, y0 + j), fill=c)
 
 
+# ---------------------------------------------------------------- фигуры по маске
+# Ровные круглые формы (шестерёнка, круговые стрелки): фигура задаётся функцией «точка внутри?»,
+# пиксель закрашивается, если внутри не меньше половины его площади; дальше — объём как у
+# иконок Win95: чёрный контур, светлая кромка сверху-слева, тень снизу-справа.
+import math  # noqa: E402
+
+
+def mask_from(inside, size, ss=4):
+    m = [[False] * size for _ in range(size)]
+    for y in range(size):
+        for x in range(size):
+            hit = sum(inside(x + (i + 0.5) / ss, y + (j + 0.5) / ss) for j in range(ss) for i in range(ss))
+            m[y][x] = hit * 2 >= ss * ss
+    return m
+
+
+def bevel_shape(m, fill, light, shadow, outline=K, width=2):
+    """width=2 — кромка в 1 px внутри контура (32×32); width=1 — для мелких иконок 16×16."""
+    n = len(m)
+    img = Image.new("RGBA", (n, n), (0, 0, 0, 0))
+    inside = lambda x, y: 0 <= x < n and 0 <= y < n and m[y][x]  # noqa: E731
+    edge = lambda x, y: inside(x, y) and not (inside(x - 1, y) and inside(x + 1, y)  # noqa: E731
+                                              and inside(x, y - 1) and inside(x, y + 1))
+    for y in range(n):
+        for x in range(n):
+            if not m[y][x]:
+                continue
+            if edge(x, y):
+                c = outline
+            elif width == 1:
+                c = shadow if edge(x + 1, y) or edge(x, y + 1) else light if edge(x - 1, y) or edge(x, y - 1) else fill
+            elif not (inside(x - 2, y) and inside(x, y - 2)) or not inside(x - 1, y - 1):
+                c = light
+            elif not (inside(x + 2, y) and inside(x, y + 2)) or not inside(x + 1, y + 1):
+                c = shadow
+            else:
+                c = fill
+            img.putpixel((x, y), c + (255,))
+    return img
+
+
+def in_triangle(x, y, a, b, c):
+    def side(p, q, r):
+        return (p[0] - r[0]) * (q[1] - r[1]) - (q[0] - r[0]) * (p[1] - r[1])
+    d = (side((x, y), a, b), side((x, y), b, c), side((x, y), c, a))
+    return not (min(d) < 0 < max(d))
+
+
+def gear_shape(size, R, r_root, teeth, tip_half, root_half, hole):
+    """Шестерёнка: зубцы-трапеции (полуширина вершины и основания — в градусах), отверстие в центре."""
+    c, period = size / 2, 360 / teeth
+
+    def inside(x, y):
+        r = math.hypot(x - c, y - c)
+        a = abs((math.degrees(math.atan2(y - c, x - c)) + period / 2) % period - period / 2)
+        if a <= tip_half:
+            lim = R
+        elif a <= root_half:
+            lim = R - (R - r_root) * (a - tip_half) / (root_half - tip_half)
+        else:
+            lim = r_root
+        return hole <= r <= lim
+    return inside
+
+
 # ---------------------------------------------------------------- иконки 16×16
 def folder(open_=False):
     img, d = canvas()
@@ -104,26 +169,34 @@ def excel():
     return img
 
 
+# «Обновить»: две зелёные стрелки по кругу, нарисованы по пикселям (верхняя половина;
+# нижняя — та же, повёрнутая на 180°)
+REFRESH16_TOP = [
+    "......KKKK......",
+    "....KKLLLLKK.K..",
+    "...KLLGGGGLLKLK.",
+    "..KLGK....KGLLK.",
+    "..KLK....KLLLLK.",
+    ".KLGK...KKKKKKK.",
+    ".KLK............",
+    ".KLK............",
+]
+
+
 def refresh():
-    img, d = canvas()
-    d.arc((2, 2, 13, 13), 200, 340, fill=G, width=2)
-    d.arc((2, 2, 13, 13), 20, 160, fill=G, width=2)
-    d.polygon([(10, 1), (14, 4), (10, 7)], fill=G)   # стрелка вправо сверху
-    d.polygon([(5, 8), (1, 11), (5, 14)], fill=G)    # стрелка влево снизу
+    top = Image.new("RGBA", (16, 8), (0, 0, 0, 0))
+    for y, row in enumerate(REFRESH16_TOP):
+        for x, ch in enumerate(row):
+            if ch != ".":
+                top.putpixel((x, y), {"K": K, "L": L, "G": G}[ch] + (255,))
+    img = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
+    img.paste(top, (0, 0))
+    img.paste(top.rotate(180), (0, 8))
     return img
 
 
 def gear():
-    img, d = canvas()
-    for x, y in ((7, 0), (7, 13), (0, 7), (13, 7), (2, 2), (12, 2), (2, 12), (12, 12)):
-        d.rectangle((x, y, x + 1 if x in (7, 0, 13) or y in (0, 13) else x + 1, y + 1 if True else y), fill=D)
-    d.ellipse((2, 2, 13, 13), fill=S, outline=K)
-    d.ellipse((5, 5, 10, 10), fill=W, outline=K)
-    for x, y in ((7, 0), (8, 0), (7, 15), (8, 15), (0, 7), (0, 8), (15, 7), (15, 8)):
-        d.point((x, y), fill=K)
-    px(d, [(2, 2), (13, 2), (2, 13), (13, 13), (3, 2), (2, 3), (12, 2), (13, 3), (2, 12), (3, 13), (13, 12), (12, 13)], K)
-    d.line((5, 5, 6, 6), fill=D)
-    return img
+    return bevel_shape(mask_from(gear_shape(16, 7.9, 5.6, 8, 10, 16, 2.1), 16), S, W, D, width=1)
 
 
 QUESTION = [
@@ -460,7 +533,6 @@ ICONS = {
 # ---------------------------------------------------------------- большие иконки 32×32
 # Рисуются отдельно (как большие иконки Win95), а не увеличением 16×16: чёрный контур,
 # белый блик сверху-слева, тёмная тень снизу-справа, 16 цветов.
-import math  # noqa: E402
 
 
 def c32():
@@ -575,30 +647,25 @@ def excel32():
 
 
 def refresh32():
-    img, d = c32()
-    for width, col in ((7, K), (4, L)):
-        d.arc((4, 4, 27, 27), 200, 345, fill=col, width=width)
-        d.arc((4, 4, 27, 27), 20, 165, fill=col, width=width)
-    d.arc((5, 5, 26, 26), 205, 340, fill=G, width=1)
-    d.arc((5, 5, 26, 26), 25, 160, fill=G, width=1)
-    d.polygon([(21, 1), (31, 8), (20, 13)], fill=L, outline=K)               # стрелка сверху
-    d.polygon([(11, 30), (1, 23), (12, 18)], fill=L, outline=K)              # стрелка снизу
-    return img
+    c = 16.0
+
+    def half(x, y):   # дуга сверху + наконечник справа; вторая половина — поворот на 180°
+        r = math.hypot(x - c, y - c)
+        ang = math.degrees(math.atan2(y - c, x - c)) % 360
+        if 7.6 <= r <= 12.4 and 178 <= ang <= 322:
+            return True
+        return in_triangle(x, y, (29.5, 4.0), (29.5, 14.6), (18.9, 14.6))
+
+    return bevel_shape(mask_from(lambda x, y: half(x, y) or half(32 - x, 32 - y), 32), L, W, G)
 
 
 def gear32():
-    img, d = c32()
-    cx = cy = 15.5
-    pts = []
-    for i in range(32):
-        a = 2 * math.pi * i / 32
-        r = 15 if (i // 2) % 2 == 0 else 11.5
-        pts.append((cx + r * math.cos(a + math.pi / 32), cy + r * math.sin(a + math.pi / 32)))
-    d.polygon(pts, fill=S, outline=K)
-    d.ellipse((6, 6, 25, 25), fill=S, outline=D)
-    d.arc((6, 6, 25, 25), 135, 315, fill=W)
-    d.ellipse((11, 11, 20, 20), fill=D, outline=K)
-    d.arc((11, 11, 20, 20), 315, 135, fill=W)
+    img = bevel_shape(mask_from(gear_shape(32, 15.4, 11.2, 8, 9, 15, 4.6), 32), S, W, D)
+    for y in range(32):   # кольцевая канавка вокруг ступицы (тень сверху-слева, блик снизу-справа)
+        for x in range(32):
+            dx, dy = x + 0.5 - 16, y + 0.5 - 16
+            if 7.0 <= math.hypot(dx, dy) < 8.0 and img.getpixel((x, y))[3]:
+                img.putpixel((x, y), (D if dx + dy < 0 else W) + (255,))
     return img
 
 
