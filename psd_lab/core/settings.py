@@ -62,6 +62,13 @@ class Settings:
     compare_log: bool = True         # логарифмическая ось X на сравнении
     windows: list = field(default_factory=lambda: [[None, 15], [15, 45], [15, 53], [45, 105], [53, None]])
     density_g_cm3: float = 4.0       # плотность материала для удельной поверхности
+    sls_windows: list = field(default_factory=lambda: [[15, 45], [15, 53], [20, 63]])   # М3, мкм
+    ebm_windows: list = field(default_factory=lambda: [[45, 105], [45, 150]])
+    sls_index: int = 0               # выбранное окно СЛС для полос
+    ebm_index: int = 0
+    sieve_window: list = field(default_factory=lambda: [15, 53])                         # М4
+    requirements: dict = field(default_factory=lambda: {"d10_min": 15.0, "d50_min": 25.0,
+                                                         "d50_max": 35.0, "d90_max": 53.0})
     splash: bool = True              # заставка при запуске
     show_log: bool = True            # панель «Журнал»
     ui_scale: float = 0              # масштаб интерфейса: 0 — авто, иначе 1.0…2.0
@@ -76,6 +83,14 @@ class Settings:
     @property
     def windows_tuples(self) -> list[tuple]:
         return [tuple(w) for w in self.windows]
+
+    @property
+    def sls(self) -> tuple:
+        return tuple(self.sls_windows[min(self.sls_index, len(self.sls_windows) - 1)])
+
+    @property
+    def ebm(self) -> tuple:
+        return tuple(self.ebm_windows[min(self.ebm_index, len(self.ebm_windows) - 1)])
 
     def add_recent(self, path, limit=8) -> None:
         p = str(path)

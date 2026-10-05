@@ -220,3 +220,57 @@ class ReadoutBar(tk.Frame):
         colors = colors or [None] * len(values)
         for lab, v, c in zip(self.values, values, colors):
             lab.configure(text=v, foreground=c or theme.TEXT)
+
+
+class NoteBox(tk.Frame):
+    """Жёлтая заметка с чёрной рамкой (как подсказка Win95): «Допущения: …», «Справка: …»."""
+
+    def __init__(self, parent, text="", title="Допущения:"):
+        super().__init__(parent, background=theme.TOOLTIP_BG, highlightbackground=theme.DARK,
+                         highlightcolor=theme.DARK, highlightthickness=1)
+        self.label = tk.Label(self, background=theme.TOOLTIP_BG, justify="left", anchor="w",
+                              padx=theme.px(6), pady=theme.px(4))
+        self.label.pack(fill="x")
+        self.title = title
+        self.set(text)
+        self.bind("<Configure>", lambda e: self.label.configure(wraplength=max(200, e.width - theme.px(16))))
+
+    def set(self, text: str, title: str | None = None):
+        if title is not None:
+            self.title = title
+        self.label.configure(text=(f"{self.title} {text}" if self.title else text))
+
+
+class Table(tk.Frame):
+    """Таблица на Treeview в вдавленной рамке: columns = [(заголовок, ширина_симв, anchor)]."""
+
+    def __init__(self, parent, columns, height=6, tree_col=None):
+        super().__init__(parent, background=theme.FACE)
+        import tkinter.font as tkfont
+
+        frame = sunken(self)
+        frame.pack(fill="both", expand=True)
+        show = "tree headings" if tree_col else "headings"
+        self.tree = ttk.Treeview(frame, columns=[f"c{i}" for i in range(len(columns))], show=show,
+                                 height=height, selectmode="browse")
+        sb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        self.tree.pack(fill="both", expand=True)
+        ch = tkfont.Font(root=self, font=theme.FONTS["ui"]).measure("0") + 1
+        if tree_col:
+            self.tree.heading("#0", text=tree_col[0])
+            self.tree.column("#0", width=tree_col[1] * ch, stretch=False)
+        for i, (name, w, anchor) in enumerate(columns):
+            self.tree.heading(f"c{i}", text=name)
+            self.tree.column(f"c{i}", width=w * ch, anchor=anchor, stretch=(i == 0))
+
+    def fill(self, rows, images=None, texts=None):
+        self.tree.delete(*self.tree.get_children())
+        for i, r in enumerate(rows):
+            kw = {}
+            if images:
+                kw["image"] = images[i]
+            if texts:
+                kw["text"] = texts[i]
+            self.tree.insert("", "end", values=["" if v is None else v for v in r], **kw)

@@ -86,3 +86,24 @@ def test_exports(win, tmp_path):
     assert (tmp_path / "Сводка.xlsx").exists()
     assert "TANMB исходный" in (tmp_path / "отчёт.html").read_text(encoding="utf-8")
     assert len(list((tmp_path / "png").rglob("*.png"))) == 13
+
+
+def test_module_tabs(win):
+    from psd_lab.gui.main_window import TABS
+
+    s = next(x for x in win.all_samples() if x.name == "П/С +0,5Y2O3")
+    sid = next(k for k, v in win.items.items() if v is s)
+    win.tree.selection_set(sid)
+    win.root.update()
+    for name in ("Популяции", "Технология", "Поверхность"):
+        win.nb.select(TABS.index(name))
+        win.root.update()
+    pops = win.mod_tabs["Популяции"].pops.tree
+    assert len(pops.get_children()) == 2                     # мелкая + крупная
+    tech = win.mod_tabs["Технология"]
+    tech.lo.delete(0, "end"), tech.lo.insert(0, "20")
+    tech.on_sieve()
+    assert win.st.sieve_window == [20.0, 53.0]
+    assert tech.yield_bar.values[0].cget("text") != "—"
+    surf = win.mod_tabs["Поверхность"]
+    assert "91,9 % поверхности" in surf.headline.cget("text")

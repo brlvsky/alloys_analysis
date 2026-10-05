@@ -18,10 +18,15 @@ def test_batch(tmp_path):
     assert (tmp_path / "compare.png").exists()
     assert len(list(tmp_path.rglob("*.png"))) == 13
     wb = load_workbook(tmp_path / "summary.xlsx")
-    assert wb.sheetnames == ["Сводка", "Кривые", "Флаги"]
+    assert wb.sheetnames == ["Сводка", "Кривые", "Флаги", "Популяции", "Окна печати", "Выход годного",
+                             "Поверхность"]
     assert wb["Сводка"].max_row == 13
     html = (tmp_path / "report.html").read_text(encoding="utf-8")
-    assert html.count("data:image/png;base64,") == 13
+    # 13 графиков распределений + 6 графиков популяций (многомодальные образцы) + полосы окон печати
+    assert html.count("data:image/png;base64,") == 13 + 6 + 1
+    for sec in ("Популяции частиц", "окна СЛС и СЭЛС", "Выход годного", "Удельная поверхность"):
+        assert sec in html
+    assert html.count("Допущения:") >= 3
     assert "П/С +0,5Y2O3" in html and "ОШИБКА" in html
     assert "src='http" not in html and 'src="http' not in html  # самодостаточный файл
 

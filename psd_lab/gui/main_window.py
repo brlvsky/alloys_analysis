@@ -21,6 +21,7 @@ from ..core.settings import Settings, app_base_dir, data_dir, resource_dir
 from . import theme
 from .dialogs.about import AboutDialog, Splash
 from .dialogs.settings_dialog import SettingsDialog
+from .tabs.modules import PopulationsTab, SurfaceTab, TechTab
 from .tabs.placeholder import PlaceholderTab
 from .tabs.plot_panel import PlotPanel
 from .tabs.summary import SummaryTab
@@ -247,7 +248,9 @@ class MainWindow:
                              extra=self._compare_toolbar)
         self.summary = SummaryTab(self.nb, on_select=self.on_summary_select,
                                   icon=lambda lv: theme.load_icon(self.root, FLAG_ICON[lv]))
-        tabs = {"Распределение": dist_tab, "Сравнение": self.cmp, "Сводка": self.summary}
+        self.mod_tabs = {"Популяции": PopulationsTab(self.nb, self), "Технология": TechTab(self.nb, self),
+                         "Поверхность": SurfaceTab(self.nb, self)}
+        tabs = {"Распределение": dist_tab, "Сравнение": self.cmp, "Сводка": self.summary, **self.mod_tabs}
         for name in TABS:
             w = tabs.get(name) or PlaceholderTab(self.nb, name)
             self.nb.add(w, text=name, underline=0 if name in tabs else -1)
@@ -485,6 +488,8 @@ class MainWindow:
             self.current = self.items.get(iid)
             self.show_props(self.current)
         self.refresh_dist()
+        if TABS[self.nb.index("current")] in self.mod_tabs:
+            self.refresh_tab()
 
     def on_summary_select(self, samples):
         if samples:
@@ -638,6 +643,8 @@ class MainWindow:
             self.refresh_dist()
         self.refresh_cmp()
         self.summary.show(self.enabled_samples(), self.st.windows_tuples)
+        if self.nb.index("current") >= 3:
+            self.refresh_tab()
         if self.current is not None:
             self.show_props(self.current)
         elif not self.groups:
@@ -645,12 +652,33 @@ class MainWindow:
         self.update_status()
 
     def refresh_tab(self):
-        """При открытии вкладки — перерисовать её график под текущий размер окна."""
-        cur = self.nb.index("current")
-        if cur == TABS.index("Сравнение"):
+        """При открытии вкладки — перерисовать её график под текущий размер окна.
+        Вкладки модулей считаются лениво: только когда они на экране."""
+        cur = TABS[self.nb.index("current")]
+        if cur == "Сравнение":
             self.cmp.draw()
-        elif cur == TABS.index("Распределение") and self.current is not None:
+        elif cur == "Распределение" and self.current is not None:
             self.dist.draw()
+        elif cur in self.mod_tabs:
+            try:
+                self.mod_tabs[cur].refresh()
+            except Exception as e:  # noqa: BLE001 — модуль не должен ронять программу
+                self.log(f"ОШИБКА модуля «{cur}»: {e}")
+
+    def busy(self, on: bool):
+        self.root.configure(cursor="watch" if on else "")
+        self.root.update_idletasks()
+
+    def save_figure_png(self, draw, name):
+        """Сохранение графика модуля в публикационном стиле (10×6 дюймов, 200 dpi)."""
+        from ..core.plots import new_figure
+
+        p = self._ask_save("Сохранить график", safe_filename(name) + ".png", ".png", [("PNG", "*.png")])
+        if p:
+            fig = new_figure()
+            draw(fig)
+            fig.savefig(p, facecolor="white")
+            self.log(f"Сохранён {p}")
 
     def refresh_dist(self):
         s = self.current
@@ -772,11 +800,14 @@ class MainWindow:
         path = path or self._ask_save("Сводка в Excel", "summary.xlsx", ".xlsx", [("Excel", "*.xlsx")])
         if path:
             try:
-                write_xlsx(self.enabled_samples(), path, self.st.windows_tuples)
+                self.busy(True)
+                write_xlsx(self.enabled_samples(), path, self.st.windows_tuples, st=self.st)
             except PermissionError:
                 messagebox.showerror(APP_NAME, f"Не удалось записать {path.name}.\nВозможно, файл открыт в Excel — "
                                      "закройте его и повторите.", parent=self.root)
                 return
+            finally:
+                self.busy(False)
             self.log(f"Сохранена сводка {path}")
             self.update_status("Сводка сохранена")
 
@@ -792,7 +823,7 @@ class MainWindow:
             write_html(self.enabled_samples(), path, windows=self.st.windows_tuples, lang=self.st.lang,
                        bin_um=self.st.bin_um, xmax=self.st.xmax, independent_axes=self.st.independent_axes,
                        show_name=self.st.show_name, log_x=self.st.compare_log,
-                       files=[g.path for g in self.groups])
+                       files=[g.path for g in self.groups], st=self.st)
         finally:
             self.root.configure(cursor="")
         self.log(f"Сохранён отчёт {path}")
@@ -1004,6 +1035,12 @@ def run_selftest(win: MainWindow, out: Path, splash_shot: Path | None) -> int:
     for i, name in enumerate(TABS):
         win.nb.select(i)
         shots.append(grab(root, out / f"{i + 1:02d}_{safe_filename(name)}.png"))
+        inner = getattr(win.mod_tabs.get(name), "nb", None)
+        if inner is not None:   # вложенные вкладки модуля
+            for j in range(1, len(inner.tabs())):
+                inner.select(j)
+                shots.append(grab(root, out / f"{i + 1:02d}{chr(97 + j)}_{safe_filename(name)}.png"))
+            inner.select(0)
     win.nb.select(0)
     for name, cls in (("settings", lambda: SettingsDialog(root, win.st)), ("about", lambda: AboutDialog(root))):
         d = cls()

@@ -72,7 +72,8 @@ def interval_q(s: Sample) -> np.ndarray:
 
 
 # ---------------------------------------------------------------- Excel
-def write_xlsx(samples: list[Sample], path: Path, windows) -> Path:
+def write_xlsx(samples: list[Sample], path: Path, windows, st=None) -> Path:
+    """Сводка, кривые, флаги; с настройками st — ещё листы модулей М2–М5."""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -123,6 +124,11 @@ def write_xlsx(samples: list[Sample], path: Path, windows) -> Path:
             wf.append([s.name, ", ".join(s.members) or s.meas_id, LEVEL_NAMES.get(f[0], f[0]), f[1]])
     for col, w in zip("ABCD", (22, 20, 12, 100)):
         wf.column_dimensions[col].width = w
+
+    if st is not None and samples:
+        from .report_modules import xlsx_sheets
+
+        xlsx_sheets(wb, samples, st, head_font, head_fill)
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -177,7 +183,7 @@ ul.flags li{margin:3px 0}
 
 
 def write_html(samples: list[Sample], path: Path, *, windows, lang="en", bin_um=None, xmax=None,
-               independent_axes=False, show_name=True, log_x=True, files=None, skipped=None) -> Path:
+               independent_axes=False, show_name=True, log_x=True, files=None, skipped=None, st=None) -> Path:
     files = files or sorted({s.file for s in samples})
     now = dt.datetime.now().strftime("%d.%m.%Y %H:%M")
     cols = summary_columns(windows)
@@ -252,6 +258,11 @@ def write_html(samples: list[Sample], path: Path, *, windows, lang="en", bin_um=
             h.append(f"<br><img alt='{html.escape(s.label)}' src='data:image/png;base64,{_fig_b64(fig)}'>")
             h.append("</div>")
 
+    if st is not None and samples:
+        from .report_modules import html_sections
+
+        h += html_sections(samples, st, fig, _fig_b64, start=5)
+
     if skipped:
         h.append("<h2>Пропущенные файлы</h2><ul>")
         h += [f"<li>{html.escape(Path(f).name)}: {html.escape(why)}</li>" for f, why in skipped]
@@ -313,10 +324,11 @@ def run_batch(src, out, settings=None, log=print) -> BatchResult:
                     independent_axes=st.independent_axes, show_name=st.show_name, log_x=st.compare_log)
     res.outputs += [p for _, p in made]
     log(f"Графики: {len(made)} PNG в {out}")
-    res.outputs.append(write_xlsx(res.samples, out / "summary.xlsx", st.windows_tuples))
+    log("Модули: популяции, окна печати, выход годного, поверхность…")
+    res.outputs.append(write_xlsx(res.samples, out / "summary.xlsx", st.windows_tuples, st=st))
     res.outputs.append(write_html(res.samples, out / "report.html", windows=st.windows_tuples, lang=st.lang,
                                   bin_um=st.bin_um, xmax=st.xmax, independent_axes=st.independent_axes,
                                   show_name=st.show_name, log_x=st.compare_log, files=res.files,
-                                  skipped=res.skipped))
+                                  skipped=res.skipped, st=st))
     log(f"Отчёт: {out / 'report.html'}; таблица: {out / 'summary.xlsx'}")
     return res

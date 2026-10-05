@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import sys
 import tkinter as tk
+import warnings
 from tkinter import messagebox
 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
@@ -12,6 +13,9 @@ from matplotlib.figure import Figure
 
 from .. import theme
 from ..widgets import PanelTitle, Toolbar, sunken
+
+# при очень маленьком окне matplotlib не может уместить подписи — это не ошибка
+warnings.filterwarnings("ignore", message="Tight layout not applied")
 
 
 def copy_png_to_clipboard(fig: Figure) -> bool:

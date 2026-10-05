@@ -217,3 +217,143 @@ def plot_all(file_groups: list[tuple[Path, list[Sample]]], out: Path, *, lang="e
     if groups:
         made.append((None, plot_compare(groups, out / "compare.png", lang=lang, log_x=log_x, xmax=xmax)))
     return made
+
+
+# ==================================================================== графики модулей М2–М5
+SEG_COLORS = {"fine": "#d9d9d9", "sls": "#2a78d6", "both": "#4a3aa7", "gap": "#f2f2f2",
+              "ebm": "#eb6834", "coarse": "#808080"}
+SEG_TEXT = {"fine": "black", "sls": "white", "both": "white", "gap": "black", "ebm": "white", "coarse": "white"}
+POP_COLORS = {"мелкая": "#2a78d6", "крупная": "#eb6834", "средняя": "#1baf7a", "основная": "#2a78d6",
+              "субмикронная": "#808080"}
+
+
+def _style_ax(ax, fs):
+    ax.grid(True, linestyle="--", color=GRID_COLOR, linewidth=0.6)
+    ax.set_axisbelow(True)
+    ax.tick_params(labelsize=fs * 0.85)
+
+
+def draw_populations(fig, s: Sample, res, *, lang="ru", font_scale=1.0):
+    """q3*(ln x): измеренная плотность (серая заливка), компоненты и их сумма."""
+    import numpy as np
+
+    from .deconv import component_pdf_ln, density_ln
+
+    fs = 12 * font_scale
+    fig.clear()
+    ax = fig.add_subplot(111)
+    mid, q = density_ln(s)
+    # правый край: где кривая вышла на 99,9 % (дальше — шум округления прибора)
+    x_hi = d_at(s, 99.9)
+    x_hi = mid[-1] if not np.isfinite(x_hi) else min(mid[-1], x_hi * 1.3)
+    keep = mid <= x_hi
+    mid, q = mid[keep], q[keep]
+    ax.fill_between(mid, q, step="mid", color="#d9d9d9", label="измерено (q3*)", linewidth=0)
+    grid = np.exp(np.linspace(np.log(max(mid[0], 0.05)), np.log(x_hi), 600))
+    total = np.zeros_like(grid)
+    for c in res.components:
+        total += component_pdf_ln(grid, c.weight_pct, np.log(c.median_um), c.sigma)
+    for p in res.populations:
+        y = sum(component_pdf_ln(grid, c.weight_pct, np.log(c.median_um), c.sigma) for c in p.components)
+        col = POP_COLORS.get(p.kind, "#1baf7a")
+        ax.fill_between(grid, y, color=col, alpha=0.35, linewidth=0)
+        ax.plot(grid, y, color=col, linewidth=1.4,
+                label=f"{p.kind}: {p.weight_pct:.1f} %, мода {p.mode_um:.3g} мкм".replace(".", ","))
+    ax.step(mid, q, where="mid", color="#606060", linewidth=0.6)
+    ax.plot(grid, total, color="black", linewidth=1.6, label=f"модель (R² = {res.r2:.4f})".replace(".", ","))
+    for p in res.populations[1:]:
+        if p.lo_um:
+            ax.axvline(p.lo_um, color="#808080", linewidth=1, linestyle=":")
+    ax.set_xscale("log")
+    ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}"))
+    ax.set_xlim(max(mid[0], 0.1), x_hi)
+    ax.set_ylim(0, max(q.max(), total.max()) * 1.12)
+    ax.set_xlabel(TEXT[lang]["x"], fontstyle="italic", fontsize=fs)
+    ax.set_ylabel("q3* = dQ/d ln x, %", fontstyle="italic", fontsize=fs)
+    _style_ax(ax, fs)
+    ax.legend(loc="upper left", fontsize=9 * font_scale, frameon=True, edgecolor="black", fancybox=False)
+    fig.tight_layout()
+    return ax
+
+
+def draw_tech_bars(fig, samples, sls, ebm, *, font_scale=1.0):
+    """Горизонтальные составные полосы: мельче | СЛС | между | СЭЛС | крупнее (в % объёма)."""
+    from .windows import segments
+
+    fs = 12 * font_scale
+    fig.clear()
+    ax = fig.add_subplot(111)
+    if not samples:
+        ax.axis("off")
+        ax.text(0.5, 0.5, "Нет выбранных образцов", ha="center", va="center", color="#808080")
+        return ax
+    names = [s.label for s in samples]
+    seen = set()
+    for i, s in enumerate(samples):
+        left = 0.0
+        for g in segments(s, sls, ebm):
+            lab = f"{g.name} {g.label}" if g.role not in seen else None
+            seen.add(g.role)
+            ax.barh(i, g.pct, left=left, color=SEG_COLORS[g.role], edgecolor="black", linewidth=0.6,
+                    height=0.7, label=lab)
+            if g.pct >= 6:
+                ax.text(left + g.pct / 2, i, f"{g.pct:.0f}", ha="center", va="center",
+                        color=SEG_TEXT[g.role], fontsize=8.5 * font_scale)
+            left += g.pct
+    ax.set_yticks(range(len(names)), names, fontsize=9 * font_scale)
+    ax.invert_yaxis()
+    ax.set_xlim(0, 100)
+    ax.set_xlabel("доля объёма, %", fontstyle="italic", fontsize=fs)
+    ax.grid(True, axis="x", linestyle="--", color=GRID_COLOR, linewidth=0.6)
+    ax.set_axisbelow(True)
+    ax.tick_params(axis="x", labelsize=fs * 0.85)
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=6, fontsize=9 * font_scale, frameon=False)
+    fig.tight_layout()
+    return ax
+
+
+def draw_sieve(fig, s: Sample, sv, *, lang="ru", font_scale=1.0):
+    """Исходная кривая и модель после идеального рассева (подписано, что перенормировано)."""
+    fs = 12 * font_scale
+    fig.clear()
+    ax = fig.add_subplot(111)
+    ax.axvspan(sv.lo, sv.hi, color="#2a78d6", alpha=0.10, linewidth=0)
+    ax.plot(s.size_um, s.cum_pct, color="black", linewidth=1.5, label="исходный порошок")
+    ax.plot(sv.sieved.size_um, sv.sieved.cum_pct, color="#2a78d6", linewidth=2, linestyle="--",
+            label=f"после рассева {sv.lo:g}–{sv.hi:g} мкм (модель, перенормировано на 100 %)")
+    xm = max(x_limit(s), sv.hi * 1.5)
+    ax.set_xlim(0, xm)
+    ax.set_ylim(0, 100)
+    ax.set_xlabel(TEXT[lang]["x"], fontstyle="italic", fontsize=fs)
+    ax.set_ylabel(TEXT[lang]["cum"], fontstyle="italic", fontsize=fs)
+    _style_ax(ax, fs)
+    ax.legend(loc="lower right", fontsize=9 * font_scale, frameon=True, edgecolor="black", fancybox=False)
+    fig.tight_layout()
+    return ax
+
+
+def draw_surface(fig, rows, *, font_scale=1.0):
+    """Столбики по фракциям: доля объёма и доля поверхности."""
+    import numpy as np
+
+    fs = 12 * font_scale
+    fig.clear()
+    ax = fig.add_subplot(111)
+    x = np.arange(len(rows))
+    w = 0.38
+    v = [r.volume_pct for r in rows]
+    a = [r.surface_pct for r in rows]
+    b1 = ax.bar(x - w / 2, v, w, color=BAR_COLOR, edgecolor="black", linewidth=0.6, label="доля объёма")
+    b2 = ax.bar(x + w / 2, a, w, color="#2a78d6", edgecolor="black", linewidth=0.6, label="доля поверхности")
+    for bars in (b1, b2):
+        for bar in bars:
+            h = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width() / 2, h + 1, f"{h:.1f}".replace(".", ","), ha="center",
+                    va="bottom", fontsize=8.5 * font_scale)
+    ax.set_xticks(x, [f"{r.label} мкм" for r in rows], fontsize=9 * font_scale)
+    ax.set_ylim(0, 105)
+    ax.set_ylabel("%", fontstyle="italic", fontsize=fs)
+    _style_ax(ax, fs)
+    ax.legend(loc="upper right", fontsize=9 * font_scale, frameon=True, edgecolor="black", fancybox=False)
+    fig.tight_layout()
+    return ax
