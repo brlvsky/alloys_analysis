@@ -60,7 +60,7 @@ class PlotPanel(tk.Frame):
         self.title.pack(fill="x")
         self.toolbar = Toolbar(self)
         self.toolbar.pack(fill="x")
-        ic = lambda n: theme.load_icon(self, n)  # noqa: E731
+        ic = lambda n: theme.load_icon(self, n, 2 * theme.icon_px())  # noqa: E731
         self.b_zoom = self.toolbar.button(ic("zoom"), self.zoom, "Масштаб: выделите область мышью", toggle=True)
         self.b_pan = self.toolbar.button(ic("pan"), self.pan, "Сдвиг: тащите график мышью", toggle=True)
         self.toolbar.button(ic("home"), self.home, "Сброс масштаба")
@@ -72,8 +72,10 @@ class PlotPanel(tk.Frame):
             extra(self.toolbar)
 
         frame = sunken(self)
-        frame.pack(fill="both", expand=True, padx=2, pady=2)
-        self.figure = Figure(figsize=(8, 5), dpi=96, layout="tight")
+        frame.pack(fill="both", expand=True, padx=theme.px(2), pady=theme.px(2))
+        self.plot_frame = frame
+        # маленький исходный размер: холст не «распирает» окно, а растягивается вместе с ним
+        self.figure = Figure(figsize=(4, 3), dpi=theme.fig_dpi(), layout="tight")
         self.figure.patch.set_facecolor("white")
         self.canvas = FigureCanvasTkAgg(self.figure, master=frame)
         self.canvas.get_tk_widget().configure(background="white", highlightthickness=0, borderwidth=0)
@@ -86,6 +88,16 @@ class PlotPanel(tk.Frame):
 
     def draw(self):
         self._nav.update()  # сбрасывает историю масштаба под новый график
+        # подогнать фигуру под фактический размер холста (после смены масштаба экрана
+        # matplotlib может не успеть получить событие изменения размера)
+        w = self.canvas.get_tk_widget()
+        w.update_idletasks()
+        cw, ch = w.winfo_width(), w.winfo_height()
+        if cw > 20 and ch > 20:
+            self.figure.set_size_inches(cw / self.figure.dpi, ch / self.figure.dpi, forward=False)
+        # tight_layout() в функциях рисования выключает движок компоновки — включаем обратно,
+        # чтобы график перекомпоновывался при каждом изменении размера окна
+        self.figure.set_layout_engine("tight")
         self.canvas.draw_idle()
 
     def zoom(self):

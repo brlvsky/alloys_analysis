@@ -64,6 +64,12 @@ class Settings:
     density_g_cm3: float = 4.0       # плотность материала для удельной поверхности
     splash: bool = True              # заставка при запуске
     show_log: bool = True            # панель «Журнал»
+    ui_scale: float = 0              # масштаб интерфейса: 0 — авто, иначе 1.0…2.0
+    toolbar_labels: bool = True      # подписи под кнопками тулбара
+    geometry: str = ""               # размер и положение окна ("" — развернуть на весь экран)
+    zoomed: bool = True              # окно развёрнуто
+    reopen_session: bool = True      # открывать файлы прошлого сеанса
+    session_files: list = field(default_factory=list)
     recent_files: list = field(default_factory=list)
     last_dir: str = ""
 

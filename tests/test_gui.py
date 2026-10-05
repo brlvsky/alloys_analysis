@@ -24,10 +24,23 @@ def win():
     root.destroy()
 
 
-def test_load_and_toggle(win):
+def test_auto_scale():
+    from psd_lab.gui.theme import auto_user_scale
+
+    assert auto_user_scale(1920, 1080, 1.0) == 1.0     # Full HD, 100 %
+    assert auto_user_scale(2560, 1440, 1.0) == 1.25    # 27″ 1440p, 100 %
+    assert auto_user_scale(3840, 2160, 1.5) == 1.25    # 4K, Windows 150 %
+    assert auto_user_scale(3840, 2160, 1.0) == 1.5     # 4K, 100 %
+
+
+def test_welcome_then_load_and_toggle(win):
     if not RAW.exists():
         pytest.skip("нет data/raw")
+    win.root.update_idletasks()
+    assert win.welcome.winfo_manager() == "pack"       # без файлов — стартовая страница
     win.load_paths([RAW])
+    assert win.welcome.winfo_manager() == ""           # после загрузки — график
+    assert win.readouts.values[1].cget("text") == "19,64"  # d50 первого образца (N/C)
     assert len(win.all_samples()) == 12
     assert len(win.summary.tree.get_children()) == 12
     sid = next(iter(win.items))

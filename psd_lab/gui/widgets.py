@@ -36,7 +36,8 @@ class Tooltip:
         tw.wm_overrideredirect(True)
         tw.wm_geometry(f"+{x}+{y}")
         tk.Label(tw, text=self.text, background=theme.TOOLTIP_BG, foreground=theme.TEXT,
-                 relief="solid", borderwidth=1, font=theme.FONTS.get("ui"), padx=3, pady=1).pack()
+                 relief="solid", borderwidth=1, font=theme.FONTS.get("ui"), padx=theme.px(4),
+                 pady=theme.px(2)).pack()
 
     def _hide(self, _e=None):
         self._cancel()
@@ -46,12 +47,22 @@ class Tooltip:
 
 
 class ToolButton(tk.Button):
-    """Плоская кнопка тулбара: приподнимается при наведении, вдавливается при нажатии."""
+    """Плоская кнопка тулбара: приподнимается при наведении, вдавливается при нажатии.
 
-    def __init__(self, parent, image, command, tooltip="", toggle=False):
+    С text — крупная кнопка «иконка над подписью», как в лабораторном софте конца 90-х.
+    """
+
+    def __init__(self, parent, image, command, tooltip="", toggle=False, text=""):
+        kw = {}
+        if text:
+            import tkinter.font as tkfont
+
+            f = tkfont.Font(root=parent, font=theme.FONTS.get("ui"))
+            w = max(image.width() + theme.px(22), f.measure(text) + theme.px(14))
+            kw = dict(text=text, compound="top", width=w, font=theme.FONTS.get("ui"))
         super().__init__(parent, image=image, command=command, relief="flat", overrelief="raised",
-                         borderwidth=1, background=theme.FACE, activebackground=theme.FACE,
-                         highlightthickness=0, padx=3, pady=3, takefocus=0)
+                         borderwidth=max(1, theme.px(1)), background=theme.FACE, activebackground=theme.FACE,
+                         highlightthickness=0, padx=theme.px(3), pady=theme.px(3), takefocus=0, **kw)
         self.toggle_state = False
         self._toggle = toggle
         if tooltip:
@@ -68,16 +79,16 @@ class Toolbar(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent, background=theme.FACE, relief="raised", borderwidth=1)
 
-    def button(self, image, command, tooltip="", toggle=False) -> ToolButton:
-        b = ToolButton(self, image, command, tooltip, toggle)
-        b.pack(side="left", padx=0, pady=1)
+    def button(self, image, command, tooltip="", toggle=False, text="") -> ToolButton:
+        b = ToolButton(self, image, command, tooltip, toggle, text)
+        b.pack(side="left", padx=(theme.px(1), 0), pady=theme.px(2))
         return b
 
     def separator(self):
         f = tk.Frame(self, width=2, background=theme.FACE)
         tk.Frame(f, width=1, background=theme.SHADOW).pack(side="left", fill="y")
         tk.Frame(f, width=1, background=theme.LIGHT).pack(side="left", fill="y")
-        f.pack(side="left", fill="y", padx=4, pady=3)
+        f.pack(side="left", fill="y", padx=theme.px(5), pady=theme.px(4))
 
 
 class StatusBar(tk.Frame):
@@ -87,9 +98,10 @@ class StatusBar(tk.Frame):
         super().__init__(parent, background=theme.FACE)
         self.cells = []
         for i, w in enumerate(widths):
-            lab = tk.Label(self, text="", anchor="w", relief="sunken", borderwidth=1, padx=4,
-                           background=theme.FACE, width=w or None)
-            lab.pack(side="left", fill="x", expand=(w == 0), padx=(2 if i == 0 else 0, 2), pady=2)
+            lab = tk.Label(self, text="", anchor="w", relief="sunken", borderwidth=1, padx=theme.px(4),
+                           pady=theme.px(1), background=theme.FACE, width=w or None)
+            lab.pack(side="left", fill="x", expand=(w == 0), padx=(theme.px(2) if i == 0 else 0, theme.px(2)),
+                     pady=theme.px(2))
             self.cells.append(lab)
 
     def set(self, i: int, text: str):
@@ -101,7 +113,7 @@ class PanelTitle(tk.Label):
 
     def __init__(self, parent, text=""):
         super().__init__(parent, text=text, anchor="w", background=theme.TITLE_BG, foreground=theme.TITLE_FG,
-                         font=theme.FONTS.get("bold"), padx=4, pady=1)
+                         font=theme.FONTS.get("bold"), padx=theme.px(5), pady=theme.px(2))
 
 
 def sunken(parent, **kw) -> tk.Frame:
@@ -110,7 +122,7 @@ def sunken(parent, **kw) -> tk.Frame:
 
 
 def groupbox(parent, text) -> ttk.LabelFrame:
-    return ttk.LabelFrame(parent, text=text, padding=(8, 4, 8, 8))
+    return ttk.LabelFrame(parent, text=text, padding=(theme.px(8), theme.px(4), theme.px(8), theme.px(8)))
 
 
 def scrolled(parent, widget_cls, **kw):
@@ -145,14 +157,14 @@ class Dialog(tk.Toplevel):
         self.resizable(False, False)
         self.configure(background=theme.FACE)
         self.result = None
-        self.body = tk.Frame(self, background=theme.FACE, padx=10, pady=8)
+        self.body = tk.Frame(self, background=theme.FACE, padx=theme.px(12), pady=theme.px(10))
         self.body.pack(fill="both", expand=True)
-        bar = tk.Frame(self, background=theme.FACE, padx=10, pady=8)
+        bar = tk.Frame(self, background=theme.FACE, padx=theme.px(12), pady=theme.px(10))
         bar.pack(fill="x")
         self.buttons = {}
         for i, name in enumerate(reversed(buttons)):
             b = ttk.Button(bar, text=name, command=(self.on_ok if name == "OK" else self.on_cancel))
-            b.pack(side="right", padx=(6, 0))
+            b.pack(side="right", padx=(theme.px(6), 0))
             self.buttons[name] = b
         if "OK" in self.buttons:
             self.buttons["OK"].configure(default="active")
@@ -176,3 +188,35 @@ class Dialog(tk.Toplevel):
     def on_cancel(self):
         self.result = None
         self.destroy()
+
+
+class ReadoutBar(tk.Frame):
+    """Ряд «окошек» с результатами, как на панели прибора: подпись сверху, число в белом
+    вдавленном поле. set_fields(['d10, мкм', …]) → set_values(['5,81', …])."""
+
+    def __init__(self, parent, title="Результаты"):
+        super().__init__(parent, background=theme.FACE)
+        self.box = groupbox(self, title)
+        self.box.pack(fill="x", padx=theme.px(2), pady=(0, theme.px(2)))
+        self.fields: list[str] = []
+        self.values: list[tk.Label] = []
+
+    def set_fields(self, labels: list[str], wide=()):
+        if labels == self.fields:
+            return
+        for w in self.box.winfo_children():
+            w.destroy()
+        self.fields, self.values = list(labels), []
+        for i, lab in enumerate(labels):
+            tk.Label(self.box, text=lab, font=theme.FONTS["readout_label"], anchor="w").grid(
+                row=0, column=i, sticky="w", padx=(0, theme.px(6)))
+            v = tk.Label(self.box, text="—", font=theme.FONTS["readout"], anchor="e", relief="sunken",
+                         borderwidth=2, background=theme.FIELD, width=9 if lab in wide else 6,
+                         padx=theme.px(4), pady=theme.px(1))
+            v.grid(row=1, column=i, sticky="we", padx=(0, theme.px(6)))
+            self.values.append(v)
+
+    def set_values(self, values: list[str], colors: list[str | None] | None = None):
+        colors = colors or [None] * len(values)
+        for lab, v, c in zip(self.values, values, colors):
+            lab.configure(text=v, foreground=c or theme.TEXT)

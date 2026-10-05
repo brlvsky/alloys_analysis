@@ -17,14 +17,14 @@ def short(name: str) -> str:
     """'d10, мкм' → 'd10'; '<15 мкм, %' → '<15'; 'Обскурация, %' → 'Обскур., %'."""
     if name.startswith("Обскурация"):
         return "Обскур., %"
-    return name.split(",")[0].replace(" мкм", "")
+    return name.split(", ")[0].replace(" мкм", "")
 
 
 def _fmt(v, decimals):
     if v is None:
         return ""
     if isinstance(v, float):
-        return "" if not math.isfinite(v) else f"{v:.{decimals}f}"
+        return "" if not math.isfinite(v) else f"{v:.{decimals}f}".replace(".", ",")
     return str(v)
 
 
@@ -36,12 +36,15 @@ def _excel(v) -> str:
 
 
 class SummaryTab(tk.Frame):
-    def __init__(self, parent, on_select=None):
+    def __init__(self, parent, on_select=None, icon=None):
         super().__init__(parent, background=theme.FACE)
         PanelTitle(self, "Сводная таблица: размеры — мкм, доли — % объёма. Ctrl+C — копировать для Excel").pack(fill="x")
         frame = sunken(self)
         frame.pack(fill="both", expand=True, padx=2, pady=2)
-        self.tree = ttk.Treeview(frame, show="headings", selectmode="extended")
+        self.icon = icon
+        self.tree = ttk.Treeview(frame, show="tree headings", selectmode="extended")
+        self.tree.column("#0", width=theme.icon_px() + theme.px(22), minwidth=theme.icon_px() + theme.px(12),
+                         stretch=False, anchor="center")
         ys = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
         xs = ttk.Scrollbar(frame, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=ys.set, xscrollcommand=xs.set)
@@ -68,7 +71,9 @@ class SummaryTab(tk.Frame):
         self.tree.delete(*self.tree.get_children())
         ids = [f"c{i}" for i in range(len(self.cols))]
         self.tree.configure(columns=ids)
-        char = max(6, int(theme.ui_scale(self) * 7))
+        import tkinter.font as tkfont
+
+        char = tkfont.Font(root=self, font=theme.FONTS["ui"]).measure("0") + 1
         for cid, name in zip(ids, self.cols):
             w = WIDE.get(name, 8) * char
             self.tree.heading(cid, text=short(name), command=lambda c=cid: self.sort_by(c))
@@ -76,7 +81,9 @@ class SummaryTab(tk.Frame):
                              anchor="w" if name in WIDE else "e")
         self.rows, self.samples = {}, {}
         for s, r in zip(samples, summary_rows(samples, windows)):
-            iid = self.tree.insert("", "end", values=[_fmt(v, self.decimals.get(i, 2)) for i, v in enumerate(r)])
+            img = self.icon(s.worst_level) if self.icon else ""
+            iid = self.tree.insert("", "end", image=img,
+                                   values=[_fmt(v, self.decimals.get(i, 2)) for i, v in enumerate(r)])
             self.rows[iid], self.samples[iid] = r, s
         if self._sort[0] is not None:
             self.sort_by(self._sort[0], keep=True)

@@ -24,7 +24,8 @@ from .dialogs.settings_dialog import SettingsDialog
 from .tabs.placeholder import PlaceholderTab
 from .tabs.plot_panel import PlotPanel
 from .tabs.summary import SummaryTab
-from .widgets import PanelTitle, StatusBar, Toolbar, scrolled, sunken
+from .tabs.welcome import WelcomePanel
+from .widgets import PanelTitle, ReadoutBar, StatusBar, Toolbar, scrolled, sunken
 
 FLAG_ICON = {"ERROR": "flag_error", "WARN": "flag_warn", "INFO": "flag_info", None: "blank"}
 TABS = ["Распределение", "Сравнение", "Сводка", "Популяции", "Технология", "Поверхность", "Упаковка",
@@ -50,19 +51,22 @@ class MainWindow:
         self.current: Sample | None = None
 
         root.title(f"{APP_NAME} — анализ гранулометрии порошков")
-        root.geometry("1280x800")
-        root.minsize(900, 560)
+        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+        w, h = min(theme.px(1280), sw - 40), min(theme.px(820), sh - 80)
+        root.geometry(settings.geometry or f"{w}x{h}+{max(0, (sw - w) // 2)}+{max(0, (sh - h) // 3)}")
+        root.minsize(min(theme.px(900), sw - 40), min(theme.px(580), sh - 80))
         self.ic = lambda n: theme.load_icon(root, n)  # noqa: E731
 
         self._build_menu()
         self._build_toolbar()
-        self.status = StatusBar(root)
+        self.status = StatusBar(root, widths=(30, 26, 12, 0))
         self.status.pack(side="bottom", fill="x")
         self._build_log()
         self._build_body()
         self._bind_keys()
         self.update_status("Готово")
-        self.log(f"{APP_NAME} {__version__} запущен. Папка данных: {data_dir()}")
+        self.log(f"{APP_NAME} {__version__} запущен. Масштаб интерфейса {theme.SCALE['total'] * 100:.0f} %. "
+                 f"Папка данных: {data_dir()}")
 
     # ================================================================ построение окна
     def _build_menu(self):
@@ -73,10 +77,13 @@ class MainWindow:
         self.v_shared = tk.BooleanVar(value=not self.st.independent_axes)
         self.v_name = tk.BooleanVar(value=self.st.show_name)
         self.v_logx = tk.BooleanVar(value=self.st.compare_log)
+        self.v_labels = tk.BooleanVar(value=self.st.toolbar_labels)
+        self.v_scale = tk.DoubleVar(value=self.st.ui_scale or 0)
 
         m = tk.Menu(mb, tearoff=0)
         m.add_command(label="Открыть файлы…", underline=0, accelerator="Ctrl+O", command=self.open_files)
         m.add_command(label="Открыть папку…", underline=9, command=self.open_folder)
+        m.add_command(label="Открыть примеры", underline=10, command=self.open_examples)
         self.m_recent = tk.Menu(m, tearoff=0)
         m.add_cascade(label="Последние файлы", underline=0, menu=self.m_recent)
         m.add_separator()
@@ -103,6 +110,13 @@ class MainWindow:
 
         m = tk.Menu(mb, tearoff=0)
         m.add_checkbutton(label="Журнал", underline=0, variable=self.v_log, command=self.toggle_log)
+        m.add_checkbutton(label="Подписи под кнопками", underline=0, variable=self.v_labels,
+                          command=self.toggle_toolbar_labels)
+        sc = tk.Menu(m, tearoff=0)
+        for v in theme.USER_SCALES:
+            lab = f"Авто (сейчас {theme.SCALE['user'] * 100:.0f} %)" if not v else theme.scale_label(v)
+            sc.add_radiobutton(label=lab, variable=self.v_scale, value=v, command=self.on_scale_menu)
+        m.add_cascade(label="Масштаб интерфейса", underline=0, menu=sc)
         m.add_separator()
         m.add_checkbutton(label="Усреднять повторы", underline=0, variable=self.v_avg, command=self.on_view_option)
         m.add_checkbutton(label="Одинаковые оси в файле", underline=0, variable=self.v_shared, command=self.on_view_option)
@@ -142,23 +156,36 @@ class MainWindow:
 
     def _build_toolbar(self):
         tb = Toolbar(self.root)
-        tb.pack(side="top", fill="x")
-        tb.button(self.ic("open"), self.open_files, "Открыть файлы (Ctrl+O)")
-        tb.button(self.ic("open_dir"), self.open_folder, "Открыть папку")
+        if hasattr(self, "body"):
+            tb.pack(side="top", fill="x", before=self.body)
+        else:
+            tb.pack(side="top", fill="x")
+        big = theme.toolbar_px() if self.st.toolbar_labels else theme.icon_px()
+        ic = lambda n: theme.load_icon(self.root, n, big)  # noqa: E731
+        lab = (lambda s: s) if self.st.toolbar_labels else (lambda s: "")  # noqa: E731
+        tb.button(ic("open"), self.open_files, "Открыть файлы (Ctrl+O)", text=lab("Открыть"))
+        tb.button(ic("open_dir"), self.open_folder, "Открыть папку", text=lab("Папка"))
+        tb.button(ic("sample"), self.open_examples, "Открыть примеры файлов", text=lab("Примеры"))
         tb.separator()
-        tb.button(self.ic("export_png"), self.export_png_current, "Экспорт PNG текущего графика")
-        tb.button(self.ic("report"), self.export_html, "Отчёт HTML")
-        tb.button(self.ic("excel"), self.export_xlsx, "Сводка в Excel")
+        tb.button(ic("export_png"), self.export_png_current, "Сохранить текущий график в PNG", text=lab("PNG"))
+        tb.button(ic("report"), self.export_html, "Отчёт HTML для руководителя", text=lab("Отчёт"))
+        tb.button(ic("excel"), self.export_xlsx, "Сводка в Excel", text=lab("Excel"))
         tb.separator()
-        tb.button(self.ic("refresh"), self.reload, "Обновить (F5)")
-        tb.button(self.ic("settings"), self.open_settings, "Настройки")
+        tb.button(ic("refresh"), self.reload, "Перечитать файлы (F5)", text=lab("Обновить"))
+        tb.button(ic("settings"), self.open_settings, "Настройки", text=lab("Настройки"))
         tb.separator()
-        tb.button(self.ic("help"), self.about, "О программе (F1)")
+        tb.button(ic("help"), self.about, "О программе (F1)", text=lab("Справка"))
         self.toolbar = tb
+
+    def toggle_toolbar_labels(self):
+        self.st.toolbar_labels = self.v_labels.get()
+        self.toolbar.destroy()
+        self._build_toolbar()
 
     def _build_body(self):
         pw = ttk.PanedWindow(self.root, orient="horizontal")
-        pw.pack(side="top", fill="both", expand=True, padx=2, pady=2)
+        pw.pack(side="top", fill="both", expand=True, padx=theme.px(2), pady=theme.px(2))
+        self.body = pw
 
         left = ttk.PanedWindow(pw, orient="vertical")
         top = tk.Frame(left, background=theme.FACE)
@@ -170,54 +197,76 @@ class MainWindow:
         self.tree.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
         self.tree.pack(fill="both", expand=True)
-        self.tree.column("#0", width=260)
+        self.tree.column("#0", width=theme.px(270))
         self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
         self.tree.bind("<Button-1>", self.on_tree_click, add="+")
         self.tree.bind("<space>", lambda e: self.toggle_item(self.tree.focus()))
         self.tree.bind("<F2>", lambda e: self.rename_selected())
-        left.add(top, weight=3)
+        left.add(top, weight=5)
 
-        bottom = tk.Frame(left, background=theme.FACE)
-        PanelTitle(bottom, "Свойства").pack(fill="x")
-        pf, self.props = scrolled(bottom, tk.Text, height=10, width=36, wrap="word", relief="flat",
-                                  borderwidth=0, background=theme.FIELD, padx=4, pady=2, cursor="arrow")
+        mid = tk.Frame(left, background=theme.FACE)
+        PanelTitle(mid, "Свойства").pack(fill="x")
+        pf = sunken(mid)
         pf.pack(fill="both", expand=True)
-        self.props.tag_configure("key", foreground=theme.SHADOW)
-        self.props.tag_configure("head", font=theme.FONTS["bold"])
+        self.props = ttk.Treeview(pf, columns=("v",), show="tree", selectmode="none", height=8)
+        psb = ttk.Scrollbar(pf, orient="vertical", command=self.props.yview)
+        self.props.configure(yscrollcommand=psb.set)
+        psb.pack(side="right", fill="y")
+        self.props.pack(fill="both", expand=True)
+        self.props.column("#0", width=theme.px(118), stretch=False)
+        self.props.column("v", width=theme.px(150), stretch=True)
+        self.props.tag_configure("section", font=theme.FONTS["bold"], background=theme.LIGHT2)
+        self.props.tag_configure("dim", foreground=theme.SHADOW)
+        left.add(mid, weight=3)
+
+        low = tk.Frame(left, background=theme.FACE)
+        PanelTitle(low, "Замечания по качеству").pack(fill="x")
+        nf, self.notes = scrolled(low, tk.Text, height=4, width=30, wrap="word", relief="flat", borderwidth=0,
+                                  background=theme.FIELD, padx=theme.px(4), pady=theme.px(3), cursor="arrow",
+                                  spacing1=theme.px(1), spacing3=theme.px(3))
+        nf.pack(fill="both", expand=True)
         for lv, (bg, fg) in theme.FLAG_COLORS.items():
-            self.props.tag_configure(lv, background=bg, foreground=fg, font=theme.FONTS["bold"])
-        self.props.configure(state="disabled")
-        left.add(bottom, weight=2)
+            self.notes.tag_configure(lv, background=bg, foreground=fg, font=theme.FONTS["bold"])
+        self.notes.tag_configure("dim", foreground=theme.SHADOW)
+        self.notes.configure(state="disabled")
+        left.add(low, weight=2)
         pw.add(left, weight=0)
 
         right = tk.Frame(pw, background=theme.FACE)
         self.nb = ttk.Notebook(right)
         self.nb.pack(fill="both", expand=True)
-        self.dist = PlotPanel(self.nb, "Распределение", on_save=self.export_png_current)
+
+        dist_tab = tk.Frame(self.nb, background=theme.FACE)
+        self.welcome = WelcomePanel(dist_tab, self.open_files, self.open_folder, self.open_examples,
+                                    lambda p: self.load_paths([p]))
+        self.dist = PlotPanel(dist_tab, "Распределение", on_save=self.export_png_current)
+        self.readouts = ReadoutBar(self.dist, "Результаты (размеры — мкм, доли — % объёма)")
+        self.readouts.pack(fill="x", side="bottom", before=self.dist.plot_frame)
         self.cmp = PlotPanel(self.nb, "Сравнение накопленных кривых", on_save=self.export_png_current,
                              extra=self._compare_toolbar)
-        self.summary = SummaryTab(self.nb, on_select=self.on_summary_select)
-        tabs = {"Распределение": self.dist, "Сравнение": self.cmp, "Сводка": self.summary}
+        self.summary = SummaryTab(self.nb, on_select=self.on_summary_select,
+                                  icon=lambda lv: theme.load_icon(self.root, FLAG_ICON[lv]))
+        tabs = {"Распределение": dist_tab, "Сравнение": self.cmp, "Сводка": self.summary}
         for name in TABS:
             w = tabs.get(name) or PlaceholderTab(self.nb, name)
             self.nb.add(w, text=name, underline=0 if name in tabs else -1)
         self.nb.enable_traversal()
         self.nb.bind("<<NotebookTabChanged>>", lambda e: self.refresh_tab())
         pw.add(right, weight=1)
-        self._empty_plots()
+        self.refresh_dist()
 
     def _compare_toolbar(self, tb):
-        tk.Checkbutton(tb, text="Лог. ось X", variable=self.v_logx, command=self.on_view_option,
-                       background=theme.FACE, activebackground=theme.FACE).pack(side="left", padx=4)
+        tk.Checkbutton(tb, text="Логарифмическая ось X", variable=self.v_logx, command=self.on_view_option,
+                       background=theme.FACE, activebackground=theme.FACE).pack(side="left", padx=theme.px(4))
 
     def _build_log(self):
         self.log_frame = tk.Frame(self.root, background=theme.FACE)
         self.log_frame.pack(side="bottom", fill="x")
         head = tk.Frame(self.log_frame, background=theme.FACE)
         head.pack(fill="x")
-        tk.Label(head, text="Журнал", font=theme.FONTS["bold"]).pack(side="left", padx=4)
+        tk.Label(head, text="Журнал", font=theme.FONTS["bold"]).pack(side="left", padx=theme.px(4))
         self.log_btn = ttk.Button(head, text="Скрыть", width=-8, command=lambda: self._set_log(not self.v_log.get()))
-        self.log_btn.pack(side="right", padx=2, pady=1)
+        self.log_btn.pack(side="right", padx=theme.px(2), pady=theme.px(1))
         self.log_body, self.log_text = None, None
         frame = sunken(self.log_frame)
         self.log_text = tk.Text(frame, height=5, font=theme.FONTS["mono"], relief="flat", borderwidth=0,
@@ -249,7 +298,7 @@ class MainWindow:
         self.v_log.set(show)
         self.st.show_log = show
         if show:
-            self.log_body.pack(fill="x", padx=2, pady=(0, 2))
+            self.log_body.pack(fill="x", padx=theme.px(2), pady=(0, theme.px(2)))
             self.log_btn.configure(text="Скрыть")
         else:
             self.log_body.pack_forget()
@@ -345,6 +394,10 @@ class MainWindow:
                     self.tree.see(sid)
         self.refresh_icons()
         self.refresh_all()
+        self.tree.yview_moveto(0)
+        sel = self.tree.selection()
+        if sel:
+            self.tree.see(sel[0])
 
     def refresh_icons(self):
         for fid, g in self.file_items.items():
@@ -444,7 +497,7 @@ class MainWindow:
         if not bbox:
             return
         x, y, w, h = bbox
-        off = theme.icon_size(self.root) * 2 + 6
+        off = theme.icon_px() * 2 + max(2, theme.icon_px() // 8) + theme.px(6)
         ent = tk.Entry(self.tree, relief="solid", borderwidth=1)
         ent.insert(0, s.name)
         ent.select_range(0, "end")
@@ -487,53 +540,87 @@ class MainWindow:
 
     # ================================================================ свойства
     def show_props(self, s: Sample | None, group: FileGroup | None = None):
-        t = self.props
+        tv = self.props
+        tv.delete(*tv.get_children())
+
+        def section(title):
+            return tv.insert("", "end", text=title, values=("",), open=True, tags=("section",))
+
+        def row(parent, k, v, dim=False):
+            tv.insert(parent, "end", text=k, values=(v,), tags=("dim",) if dim else ())
+
+        notes = []
+        if group is not None:
+            sec = section("Файл")
+            row(sec, "Имя", group.path.name)
+            row(sec, "Папка", str(group.path.parent))
+            row(sec, "Измерений", str(len(group.raw)))
+            row(sec, "Образцов", str(len(group.shown)))
+            for x in group.shown:
+                notes += [(f[0], f"{x.name}: {f[1]}") for f in x.flags]
+        elif s is not None:
+            m = s.meta
+            sec = section("Образец")
+            row(sec, "Название", s.name)
+            row(sec, "Измерения", ", ".join(s.members) if s.members else (s.meas_id or "—"))
+            row(sec, "Файл", Path(s.file).name)
+            row(sec, "Лист", s.sheet or "—")
+            row(sec, "Источник", "экспорт Fritsch" if s.source == "fritsch" else "таблица")
+            if s.members:
+                row(sec, "Расхождение повт.", f"{m.get('repeat_spread_pp', 0):.2f} п.п.")
+            if s.source == "fritsch":
+                sec = section("Прибор")
+                if m.get("date"):
+                    row(sec, "Дата", f"{m['date']:%d.%m.%Y %H:%M}" if hasattr(m["date"], "strftime") else str(m["date"]))
+                for k, name, fmt in (("model", "Модель", "{}"), ("obscuration", "Обскурация, %", "{:.0f}"),
+                                     ("error", "Error", "{:.4f}"), ("tradeoff", "TradeOff", "{:.0f}"),
+                                     ("ultrasonics", "Ультразвук", "{:g}"), ("pump", "Насос", "{:g}"),
+                                     ("d43_instrument", "D[4,3] прибора", "{:.2f} мкм")):
+                    v = m.get(k)
+                    if v is not None:
+                        row(sec, name, fmt.format(v))
+            mm = compute(s, self.st.windows_tuples)
+            sec = section("Результат")
+            for k in ("d10", "d50", "d90"):
+                row(sec, k, f"{mm[k]:.2f} мкм")
+            row(sec, "span", f"{mm['span']:.2f}")
+            row(sec, "D[4,3] / D[3,2]", f"{mm['d43']:.2f} / {mm['d32']:.2f} мкм")
+            row(sec, "Конец кривой", f"{s.cum_pct[-1]:.1f} %")
+            notes = [(f[0], f[1]) for f in s.flags]
+
+        t = self.notes
         t.configure(state="normal")
         t.delete("1.0", "end")
-        if group is not None:
-            t.insert("end", group.path.name + "\n", "head")
-            t.insert("end", "Папка: ", "key")
-            t.insert("end", f"{group.path.parent}\n")
-            t.insert("end", "Измерений: ", "key")
-            t.insert("end", f"{len(group.raw)}; образцов: {len(group.shown)}\n")
-        elif s is not None:
-            t.insert("end", s.label + "\n", "head")
-            m = s.meta
-            rows = [("Файл", Path(s.file).name), ("Лист", s.sheet),
-                    ("Источник", "экспорт Fritsch" if s.source == "fritsch" else "таблица")]
-            if s.members:
-                rows.append(("Повторы", f"{len(s.members)}, расхождение до {m.get('repeat_spread_pp', 0):.2f} п.п."))
-            if m.get("date"):
-                rows.append(("Дата", f"{m['date']:%d.%m.%Y %H:%M}" if hasattr(m["date"], "strftime") else str(m["date"])))
-            for k, name, fmt in (("model", "Модель", "{}"), ("obscuration", "Обскурация, %", "{:g}"),
-                                 ("error", "Error", "{:.4f}"), ("tradeoff", "TradeOff", "{:.0f}"),
-                                 ("ultrasonics", "Ультразвук", "{:g}"), ("pump", "Насос", "{:g}"),
-                                 ("d43_instrument", "D[4,3] прибора, мкм", "{:.2f}")):
-                v = m.get(k)
-                if v is not None:
-                    rows.append((name, fmt.format(v)))
-            mm = compute(s, self.st.windows_tuples)
-            rows.append(("d10 / d50 / d90", f"{mm['d10']:.2f} / {mm['d50']:.2f} / {mm['d90']:.2f} мкм"))
-            for k, v in rows:
-                t.insert("end", f"{k}: ", "key")
-                t.insert("end", f"{v}\n")
-            t.insert("end", "\nФлаги качества:\n", "head")
-            if not s.flags:
-                t.insert("end", "нет\n")
-            for f in sorted(s.flags, key=lambda f: LEVEL_ORDER.get(f[0], 9)):
-                t.insert("end", f" {LEVEL_NAMES.get(f[0], f[0])} ", f[0])
-                t.insert("end", f" {f[1]}\n")
+        if s is None and group is None:
+            t.insert("end", "Выберите образец в списке.", "dim")
+        elif not notes:
+            t.insert("end", "Замечаний нет.", "dim")
+        seen = set()
+        for lv, text in sorted(notes, key=lambda f: LEVEL_ORDER.get(f[0], 9)):
+            if (lv, text) in seen:
+                continue
+            seen.add((lv, text))
+            t.insert("end", f" {LEVEL_NAMES.get(lv, lv)} ", lv)
+            t.insert("end", f"  {text}\n")
         t.configure(state="disabled")
 
     # ================================================================ вкладки
-    def _empty_plots(self):
-        for p, text in ((self.dist, "Откройте файлы: Файл → Открыть файлы… (Ctrl+O)"),
-                        (self.cmp, "Нет выбранных образцов")):
-            p.figure.clear()
-            ax = p.figure.add_subplot(111)
-            ax.axis("off")
-            ax.text(0.5, 0.5, text, ha="center", va="center", fontsize=11, color="#808080")
-            p.draw()
+    def _empty_cmp(self, text="Нет выбранных образцов: отметьте их флажками слева"):
+        self.cmp.figure.clear()
+        ax = self.cmp.figure.add_subplot(111)
+        ax.axis("off")
+        ax.text(0.5, 0.5, text, ha="center", va="center", fontsize=11, color="#808080")
+        self.cmp.set_title("Сравнение накопленных кривых")
+        self.cmp.draw()
+
+    def _show_welcome(self, show: bool):
+        if show:
+            self.dist.pack_forget()
+            self.welcome.set_recent(self.st.recent_files)
+            self.welcome.pack(fill="both", expand=True)
+        else:
+            self.welcome.pack_forget()
+            self.dist.pack(fill="both", expand=True)
 
     def refresh_all(self, keep_dist=False):
         if not keep_dist or self.current is None:
@@ -542,36 +629,62 @@ class MainWindow:
         self.summary.show(self.enabled_samples(), self.st.windows_tuples)
         if self.current is not None:
             self.show_props(self.current)
+        elif not self.groups:
+            self.show_props(None)
         self.update_status()
 
     def refresh_tab(self):
-        pass  # всё обновляется сразу; хук для будущих вкладок
+        """При открытии вкладки — перерисовать её график под текущий размер окна."""
+        cur = self.nb.index("current")
+        if cur == TABS.index("Сравнение"):
+            self.cmp.draw()
+        elif cur == TABS.index("Распределение") and self.current is not None:
+            self.dist.draw()
 
     def refresh_dist(self):
         s = self.current
         if s is None:
-            self._empty_plots()
-            self.dist.set_title("Распределение")
+            self._show_welcome(not self.groups)
+            if self.groups:
+                self.dist.figure.clear()
+                self.dist.set_title("Распределение — выберите образец слева")
+                self.dist.draw()
+            self.readouts.set_values(["—"] * len(self.readouts.fields))
             return
+        self._show_welcome(False)
         grp = next((g.shown for g in self.groups if s in g.shown), [s])
         xm, ym = (None, None) if self.st.independent_axes else common_axes(grp, self.st.bin_um, self.st.xmax)
         draw_sample(self.dist.figure, s, lang=self.st.lang, bin_um=self.st.bin_um, xmax=self.st.xmax or xm,
-                    ymax=ym, show_name=self.st.show_name, font_scale=0.85)
+                    ymax=ym, show_name=self.st.show_name, font_scale=0.9)
         self.dist.set_title(f"Распределение — {s.label}")
         self.dist.draw()
+        self.update_readouts(s)
+
+    def update_readouts(self, s: Sample):
+        from ..core.metrics import window_label
+
+        wins = self.st.windows_tuples
+        fields = ["d10", "d50", "d90", "span", "D[4,3]", "D[3,2]"] + [window_label(lo, hi) for lo, hi in wins]
+        fields.append("Обскур., %")
+        self.readouts.set_fields(fields)
+        m = compute(s, wins)
+        num = lambda v, nd=2: "—" if v is None or v != v else f"{v:.{nd}f}".replace(".", ",")  # noqa: E731
+        vals = [num(m["d10"]), num(m["d50"]), num(m["d90"]), num(m["span"]), num(m["d43"]), num(m["d32"])]
+        vals += [num(v, 1) for v in m["fractions"].values()]
+        obs = s.meta.get("obscuration")
+        vals.append(num(obs, 0))
+        colors = [None] * (len(vals) - 1)
+        colors.append("#FF0000" if obs is not None and (obs < 0 or obs > 40) else None)
+        self.readouts.set_values(vals, colors)
 
     def refresh_cmp(self):
         groups = self.enabled_groups()
         if not groups:
-            self._empty_plots() if self.current is None else None
-            self.cmp.figure.clear()
-            ax = self.cmp.figure.add_subplot(111)
-            ax.axis("off")
-            ax.text(0.5, 0.5, "Нет выбранных образцов", ha="center", va="center", fontsize=11, color="#808080")
-            self.cmp.draw()
+            self._empty_cmp("Откройте файлы: Файл → Открыть файлы… (Ctrl+O)" if not self.groups else
+                            "Нет выбранных образцов: отметьте их флажками слева")
             return
         draw_compare(self.cmp.figure, groups, lang=self.st.lang, log_x=self.st.compare_log,
-                     xmax=self.st.xmax, font_scale=0.85)
+                     xmax=self.st.xmax, font_scale=0.9)
         n = sum(len(g) for g in groups)
         self.cmp.set_title(f"Сравнение накопленных кривых — образцов: {n}")
         self.cmp.draw()
@@ -710,6 +823,27 @@ class MainWindow:
         if d:
             self.load_paths([d])
 
+    def open_examples(self):
+        d = examples_dir()
+        if d is None:
+            messagebox.showinfo(APP_NAME, "Папка с примерами не найдена (examples рядом с программой).",
+                                parent=self.root)
+            return
+        self.load_paths([d])
+
+    def on_scale_menu(self):
+        v = self.v_scale.get()
+        if v == (self.st.ui_scale or 0):
+            return
+        self.st.ui_scale = v
+        self.ask_restart()
+
+    def ask_restart(self):
+        self._save_settings()
+        if messagebox.askyesno(APP_NAME, "Новый масштаб интерфейса применится после перезапуска программы.\n\n"
+                               "Перезапустить сейчас? Открытые файлы откроются снова.", parent=self.root):
+            self.quit(restart=True)
+
     def _fill_recent(self):
         m = self.m_recent
         m.delete(0, "end")
@@ -720,8 +854,15 @@ class MainWindow:
             m.add_command(label=f"{i} {p}", underline=0, command=lambda p=p: self.load_paths([p]))
 
     def open_settings(self):
-        old_avg = self.st.average
+        old_avg, old_scale, old_labels = self.st.average, self.st.ui_scale, self.st.toolbar_labels
         if SettingsDialog(self.root, self.st).show():
+            if self.st.toolbar_labels != old_labels:
+                self.v_labels.set(self.st.toolbar_labels)
+                self.toolbar.destroy()
+                self._build_toolbar()
+            if self.st.ui_scale != old_scale:
+                self.v_scale.set(self.st.ui_scale or 0)
+                self.ask_restart()
             self.v_avg.set(self.st.average)
             self.v_shared.set(not self.st.independent_axes)
             self.v_name.set(self.st.show_name)
@@ -742,12 +883,47 @@ class MainWindow:
             except OSError as e:
                 self.log(f"Не удалось сохранить настройки: {e}")
 
-    def quit(self):
+    def remember_window(self):
+        r = self.root
+        try:
+            zoomed = r.state() == "zoomed" if sys.platform == "win32" else bool(r.attributes("-zoomed"))
+        except tk.TclError:
+            zoomed = False
+        self.st.zoomed = zoomed
+        if not zoomed:
+            self.st.geometry = r.wm_geometry()
+        self.st.session_files = [str(g.path) for g in self.groups]
+
+    def quit(self, restart=False):
+        if self.save_settings:
+            self.remember_window()
         self._save_settings()
         self.root.destroy()
+        if restart:
+            import subprocess
+
+            cmd = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", "psd_lab"]
+            subprocess.Popen(cmd, cwd=str(Path.cwd()))
 
 
 # ==================================================================== скриншоты и запуск
+def examples_dir() -> Path | None:
+    """Примеры: папка examples рядом с exe или data/raw при запуске из исходников."""
+    for p in (app_base_dir() / "examples", Path.cwd() / "data" / "raw", app_base_dir() / "data" / "raw",
+              resource_dir() / "data" / "raw"):
+        if p.is_dir():
+            return p
+    return None
+
+
+def maximize(root: tk.Tk):
+    try:
+        if sys.platform == "win32":
+            root.state("zoomed")
+        else:
+            root.attributes("-zoomed", True)
+    except tk.TclError:
+        pass
 def window_bbox(win: tk.Misc):
     """Координаты окна на экране вместе с рамкой и меню."""
     win.update_idletasks()
@@ -798,12 +974,12 @@ def run_selftest(win: MainWindow, out: Path, splash_shot: Path | None) -> int:
         (out / "selftest.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     # примеры: data/raw при запуске из исходников, папка examples рядом с exe
-    raw = next((p for p in (Path.cwd() / "data" / "raw", app_base_dir() / "data" / "raw",
-                            app_base_dir() / "examples", resource_dir() / "data" / "raw") if p.is_dir()), None)
+    raw = examples_dir()
     if raw is None:
         say("SELFTEST: ОШИБКА — не найдена папка с примерами (data/raw или examples)")
         return 1
-    say(f"SELFTEST: {APP_NAME} {__version__}, папка примеров: {raw}")
+    say(f"SELFTEST: {APP_NAME} {__version__}, масштаб {theme.SCALE['total'] * 100:.0f} %, папка примеров: {raw}")
+    shots.append(grab(root, out / "00_Начало.png"))
     win.load_paths([raw])
     n = len(win.all_samples())
     say(f"SELFTEST: загружено образцов: {n}")
@@ -837,14 +1013,14 @@ def run_gui(files=None, selftest=False, out=None) -> int:
     theme.setup_dpi()
     root = tk.Tk()
     root.withdraw()
-    theme.apply(root)
+    settings = Settings() if selftest else Settings.load()
+    theme.apply(root, settings.ui_scale)
     try:
         root.iconphoto(True, theme.load_icon(root, "app", 32), theme.load_icon(root, "app", 16))
         if sys.platform == "win32":
             root.iconbitmap(default=str(resource_dir() / "assets" / "app.ico"))
     except tk.TclError:
         pass
-    settings = Settings() if selftest else Settings.load()
     code = {"rc": 0}
     out_dir = Path(out or "out") / "screens"
 
@@ -860,9 +1036,16 @@ def run_gui(files=None, selftest=False, out=None) -> int:
                 shot = grab(splash, out_dir / "00_splash.png")
             splash.destroy()
         root.deiconify()
+        if not selftest and (settings.zoomed or not settings.geometry):
+            maximize(root)
         root.update()
         if files:
             win.load_paths(files)
+        elif not selftest and settings.reopen_session:
+            prev = [p for p in settings.session_files if Path(p).exists()]
+            if prev:
+                win.log("Открываю файлы прошлого сеанса")
+                win.load_paths(prev)
         if selftest:
             try:
                 code["rc"] = run_selftest(win, out_dir, shot)
