@@ -27,6 +27,17 @@ def load(path) -> list:
     return samples
 
 
+def file_sha1(path) -> str:
+    """Отпечаток содержимого файла: один и тот же файл из разных папок узнаётся по нему."""
+    import hashlib
+
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def expand_paths(paths) -> list[Path]:
     """Файлы и папки → список поддерживаемых файлов (временные файлы Excel ~$ пропускаются)."""
     import glob

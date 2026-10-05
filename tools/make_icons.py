@@ -1,4 +1,5 @@
-"""Рисует пиксельные иконки 16×16 (и 32×32 — увеличение ×2) в 16-цветной палитре Windows,
+"""Рисует пиксельные иконки 16×16 и 32×32 в 16-цветной палитре Windows (большие иконки тулбара
+нарисованы отдельно, остальные 32×32 — увеличение 16×16 ×2),
 а также assets/app.ico (16, 32, 48).
 
 Запуск: python tools/make_icons.py
@@ -336,6 +337,244 @@ ICONS = {
 }
 
 
+# ---------------------------------------------------------------- большие иконки 32×32
+# Рисуются отдельно (как большие иконки Win95), а не увеличением 16×16: чёрный контур,
+# белый блик сверху-слева, тёмная тень снизу-справа, 16 цветов.
+import math  # noqa: E402
+
+
+def c32():
+    return canvas(32)
+
+
+def bevel_rect(d, box, fill, light=W, shadow=O, outline=K):
+    x0, y0, x1, y1 = box
+    d.rectangle(box, fill=fill, outline=outline)
+    d.line((x0 + 1, y0 + 1, x1 - 1, y0 + 1), fill=light)
+    d.line((x0 + 1, y0 + 1, x0 + 1, y1 - 1), fill=light)
+    d.line((x0 + 1, y1 - 1, x1 - 1, y1 - 1), fill=shadow)
+    d.line((x1 - 1, y0 + 2, x1 - 1, y1 - 1), fill=shadow)
+
+
+def page32(d, x0, y0, x1, y1, fold=7):
+    d.polygon([(x0, y0), (x1 - fold, y0), (x1, y0 + fold), (x1, y1), (x0, y1)], fill=W, outline=K)
+    d.polygon([(x1 - fold, y0), (x1 - fold, y0 + fold), (x1, y0 + fold)], fill=S, outline=K)
+    d.line((x1 - 1, y0 + fold + 1, x1 - 1, y1 - 1), fill=S)
+    d.line((x0 + 1, y1 - 1, x1 - 1, y1 - 1), fill=S)
+
+
+def folder32(open_=False):
+    img, d = c32()
+    d.polygon([(2, 7), (4, 5), (12, 5), (14, 7)], fill=Y, outline=K)          # язычок
+    d.line((4, 6, 12, 6), fill=W)
+    if not open_:
+        bevel_rect(d, (1, 7, 28, 27), Y)
+        d.line((2, 10, 27, 10), fill=O)                                     # кромка крышки
+        d.line((2, 11, 27, 11), fill=W)
+        d.line((2, 28, 29, 28), fill=D)                                     # тень
+        d.line((29, 8, 29, 28), fill=D)
+    else:
+        bevel_rect(d, (1, 7, 26, 27), O, light=Y, shadow=K)
+        d.polygon([(7, 13), (31, 13), (26, 27), (1, 27)], fill=Y, outline=K)
+        d.line((8, 14, 29, 14), fill=W)
+        d.line((7, 14, 2, 26), fill=W)
+        d.line((25, 26, 29, 15), fill=O)
+    return img
+
+
+def folder_docs32():
+    img, d = c32()
+    d.polygon([(2, 7), (4, 5), (12, 5), (14, 7)], fill=Y, outline=K)
+    page32(d, 6, 1, 18, 16, fold=4)
+    page32(d, 13, 3, 25, 17, fold=4)
+    for y in (8, 10, 12):
+        d.line((15, y, 22, y), fill=D)
+    for y in (6, 8):
+        d.line((8, y, 13, y), fill=D)
+    bevel_rect(d, (1, 12, 28, 27), Y)
+    d.line((2, 15, 27, 15), fill=O)
+    d.line((2, 28, 29, 28), fill=D)
+    d.line((29, 13, 29, 28), fill=D)
+    return img
+
+
+def chart_page32():
+    img, d = c32()
+    page32(d, 4, 1, 27, 30)
+    d.line((8, 7, 8, 25), fill=K)
+    d.line((8, 25, 24, 25), fill=K)
+    for x, h in ((10, 3), (13, 8), (16, 11), (19, 6), (22, 3)):
+        d.rectangle((x, 25 - h, x + 1, 24), fill=B)
+    d.line([(9, 24), (12, 22), (15, 16), (18, 11), (21, 9), (24, 8)], fill=R, width=2)
+    return img
+
+
+def picture32():
+    img, d = c32()
+    bevel_rect(d, (0, 3, 31, 28), S, light=W, shadow=D)
+    d.rectangle((3, 6, 28, 25), fill=A, outline=K)
+    d.rectangle((4, 7, 27, 12), fill=W)
+    d.rectangle((4, 13, 27, 15), fill=A)
+    d.ellipse((20, 8, 25, 13), fill=Y, outline=O)
+    d.polygon([(4, 25), (11, 14), (16, 20), (19, 17), (27, 25)], fill=G)
+    d.polygon([(11, 14), (13, 17), (9, 17)], fill=W)
+    d.line([(4, 24), (11, 15)], fill=L)
+    return img
+
+
+def report32():
+    img, d = c32()
+    page32(d, 3, 0, 28, 31)
+    d.rectangle((6, 3, 18, 5), fill=N)
+    for y in (8, 10):
+        d.line((6, y, 24, y), fill=D)
+    d.rectangle((6, 13, 25, 27), fill=W, outline=D)
+    for x, h in ((8, 4), (11, 9), (14, 12), (17, 7), (20, 4)):
+        d.rectangle((x, 26 - h, x + 1, 26), fill=B)
+    d.line([(7, 25), (10, 23), (13, 18), (16, 15), (19, 14), (24, 13)], fill=R, width=2)
+    return img
+
+
+def excel32():
+    img, d = c32()
+    d.rectangle((2, 2, 30, 29), fill=W, outline=K)
+    d.rectangle((3, 3, 29, 6), fill=G)
+    d.rectangle((3, 7, 7, 28), fill=S)
+    for x in (7, 14, 21):
+        d.line((x, 7, x, 28), fill=D)
+    for y in (11, 15, 19, 23):
+        d.line((3, y, 29, y), fill=D)
+    d.line((3, 7, 29, 7), fill=K)
+    d.rectangle((15, 16, 20, 18), fill=Y, outline=K)                          # выделенная ячейка
+    # зелёный значок «X»
+    d.rectangle((0, 17, 12, 31), fill=G, outline=K)
+    for k in range(2):
+        d.line((3 + k, 20, 8 + k, 28), fill=W)
+        d.line((8 + k, 20, 3 + k, 28), fill=W)
+    return img
+
+
+def refresh32():
+    img, d = c32()
+    for width, col in ((7, K), (4, L)):
+        d.arc((4, 4, 27, 27), 200, 345, fill=col, width=width)
+        d.arc((4, 4, 27, 27), 20, 165, fill=col, width=width)
+    d.arc((5, 5, 26, 26), 205, 340, fill=G, width=1)
+    d.arc((5, 5, 26, 26), 25, 160, fill=G, width=1)
+    d.polygon([(21, 1), (31, 8), (20, 13)], fill=L, outline=K)               # стрелка сверху
+    d.polygon([(11, 30), (1, 23), (12, 18)], fill=L, outline=K)              # стрелка снизу
+    return img
+
+
+def gear32():
+    img, d = c32()
+    cx = cy = 15.5
+    pts = []
+    for i in range(32):
+        a = 2 * math.pi * i / 32
+        r = 15 if (i // 2) % 2 == 0 else 11.5
+        pts.append((cx + r * math.cos(a + math.pi / 32), cy + r * math.sin(a + math.pi / 32)))
+    d.polygon(pts, fill=S, outline=K)
+    d.ellipse((6, 6, 25, 25), fill=S, outline=D)
+    d.arc((6, 6, 25, 25), 135, 315, fill=W)
+    d.ellipse((11, 11, 20, 20), fill=D, outline=K)
+    d.arc((11, 11, 20, 20), 315, 135, fill=W)
+    return img
+
+
+def help32():
+    img, d = c32()
+    d.ellipse((1, 1, 30, 30), fill=Y, outline=K)
+    d.arc((3, 3, 28, 28), 130, 300, fill=W, width=2)
+    d.arc((3, 3, 28, 28), 310, 120, fill=O, width=2)
+    q = ["..####..", ".##..##.", "......##", ".....##.", "....##..", "...##...", "...##...",
+         "........", "...##...", "...##..."]
+    for j, row in enumerate(q):
+        for i, ch in enumerate(row):
+            if ch == "#":
+                d.rectangle((8 + i * 2, 5 + j * 2, 9 + i * 2, 6 + j * 2), fill=N)
+    return img
+
+
+def zoom32():
+    img, d = c32()
+    d.line((19, 19, 29, 29), fill=K, width=7)
+    d.line((20, 20, 28, 28), fill=M, width=3)
+    d.ellipse((1, 1, 22, 22), fill=S, outline=K)
+    d.ellipse((4, 4, 19, 19), fill=W, outline=K)
+    d.arc((6, 6, 17, 17), 190, 260, fill=A, width=2)
+    d.rectangle((11, 7, 12, 16), fill=K)
+    d.rectangle((7, 11, 16, 12), fill=K)
+    return img
+
+
+def pan32():
+    img, d = c32()
+    d.rectangle((14, 5, 17, 26), fill=K)
+    d.rectangle((5, 14, 26, 17), fill=K)
+    for pts in ([(15.5, 0), (9, 7), (22, 7)], [(15.5, 31), (9, 24), (22, 24)],
+                [(0, 15.5), (7, 9), (7, 22)], [(31, 15.5), (24, 9), (24, 22)]):
+        d.polygon(pts, fill=K)
+    d.rectangle((13, 13, 18, 18), fill=W, outline=K)
+    return img
+
+
+def home32():
+    img, d = c32()
+    d.rectangle((21, 3, 24, 10), fill=M, outline=K)                          # труба
+    d.polygon([(15.5, 2), (31, 15), (0, 15)], fill=R, outline=K)
+    d.line((15, 4, 3, 14), fill=W)
+    bevel_rect(d, (4, 15, 27, 29), W, light=W, shadow=S)
+    d.rectangle((7, 18, 13, 23), fill=A, outline=K)
+    d.line((10, 18, 10, 23), fill=K)
+    d.line((7, 20, 13, 20), fill=K)
+    d.rectangle((17, 19, 23, 29), fill=O, outline=K)
+    d.point((21, 24), fill=Y)
+    return img
+
+
+def copy32():
+    img, d = c32()
+    page32(d, 1, 1, 18, 22, fold=5)
+    for y in (8, 11, 14, 17):
+        d.line((4, y, 14, y), fill=D)
+    page32(d, 12, 9, 30, 30, fold=5)
+    for y in (16, 19, 22, 25):
+        d.line((15, y, 26, y), fill=N)
+    return img
+
+
+def save32():
+    img, d = c32()
+    d.polygon([(1, 1), (27, 1), (30, 4), (30, 30), (1, 30)], fill=N, outline=K)
+    d.rectangle((6, 2, 25, 13), fill=W, outline=K)
+    for y in (5, 8, 11):
+        d.line((8, y, 23, y), fill=D)
+    bevel_rect(d, (7, 18, 24, 30), S, light=W, shadow=D)
+    d.rectangle((17, 20, 21, 27), fill=N)
+    d.line((2, 2, 2, 29), fill=B)
+    return img
+
+
+ICONS32 = {
+    "open": lambda: folder32(open_=True),
+    "folder": folder32,
+    "open_dir": folder_docs32,
+    "sample": chart_page32,
+    "export_png": picture32,
+    "report": report32,
+    "excel": excel32,
+    "refresh": refresh32,
+    "settings": gear32,
+    "help": help32,
+    "zoom": zoom32,
+    "pan": pan32,
+    "home": home32,
+    "copy": copy32,
+    "save": save32,
+}
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     for name, fn in ICONS.items():
@@ -343,6 +582,8 @@ def main():
         img16.save(OUT / f"{name}_16.png")
         if name == "app":
             app_icon(32).save(OUT / "app_32.png")
+        elif name in ICONS32:
+            ICONS32[name]().save(OUT / f"{name}_32.png")
         else:
             img16.resize((32, 32), Image.NEAREST).save(OUT / f"{name}_32.png")
     big = app_icon(32)

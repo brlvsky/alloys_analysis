@@ -41,6 +41,17 @@ def test_welcome_then_load_and_toggle(win):
     win.load_paths([RAW])
     assert win.welcome.winfo_manager() == ""           # после загрузки — график
     assert win.readouts.values[1].cget("text") == "19,64"  # d50 первого образца (N/C)
+
+
+def test_same_file_other_folder_not_duplicated(win, tmp_path):
+    import shutil
+
+    copy = tmp_path / "копия" / "TANMB_.xls"
+    copy.parent.mkdir()
+    shutil.copy2(RAW / "TANMB_.xls", copy)
+    before = len(win.groups)
+    win.load_paths([copy])
+    assert len(win.groups) == before
     assert len(win.all_samples()) == 12
     assert len(win.summary.tree.get_children()) == 12
     sid = next(iter(win.items))

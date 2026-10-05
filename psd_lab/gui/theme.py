@@ -32,7 +32,7 @@ FLAG_COLORS = {"ERROR": ("#FF0000", "#FFFFFF"), "WARN": ("#FFFF00", "#000000"), 
 
 FONTS: dict[str, tuple] = {}
 SCALE = {"dpi": 1.0, "user": 1.0, "total": 1.0}
-USER_SCALES = [0, 1.0, 1.25, 1.5, 1.75, 2.0]   # 0 — «Авто»
+USER_SCALES = [0, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0]   # 0 — «Авто»
 
 
 def px(n: float) -> int:
@@ -173,8 +173,8 @@ def icon_px() -> int:
 
 
 def toolbar_px() -> int:
-    """Иконки большого тулбара: 32 при 100–125 %, 48 при 150 %, 64 при 175–200 %."""
-    return 16 * max(2, round(2 * SCALE["total"]))
+    """Иконки большого тулбара (нарисованы в 32×32): 32 до 175 %, дальше 64."""
+    return 32 if SCALE["total"] < 1.75 else 64
 
 
 def _icon_image(name: str, size: int):
@@ -182,7 +182,8 @@ def _icon_image(name: str, size: int):
     from PIL import Image
 
     base = resource_dir() / "assets" / "icons"
-    src = base / f"{name}_32.png" if (name == "app" and size >= 32) else base / f"{name}_16.png"
+    # размеры, кратные 32, — из больших иконок (нарисованы отдельно), остальные — из 16×16
+    src = base / f"{name}_32.png" if size % 32 == 0 else base / f"{name}_16.png"
     try:
         img = Image.open(src).convert("RGBA")
     except OSError:

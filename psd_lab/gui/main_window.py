@@ -12,7 +12,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from .. import APP_NAME, __version__
-from ..core import expand_paths, load
+from ..core import expand_paths, file_sha1, load
 from ..core.metrics import average_repeats, compute
 from ..core.model import LEVEL_NAMES, LEVEL_ORDER, Sample
 from ..core.plots import common_axes, draw_compare, draw_sample, plot_all, plot_compare, plot_sample, safe_filename
@@ -36,6 +36,7 @@ TABS = ["Распределение", "Сравнение", "Сводка", "П�
 class FileGroup:
     path: Path
     raw: list = field(default_factory=list)     # измерения как в файле
+    sha1: str = ""
     shown: list = field(default_factory=list)   # после усреднения (или те же)
 
 
@@ -351,6 +352,15 @@ class MainWindow:
                     self.log(f"ПРОПУЩЕН  {f.name}: уже открыт (F5 — перечитать)")
                     continue
                 try:
+                    sha = file_sha1(f)
+                except OSError as e:
+                    self.log(f"ПРОПУЩЕН  {f.name}: не удалось прочитать ({e})")
+                    continue
+                twin = next((g for g in self.groups if g.sha1 == sha), None)
+                if twin is not None:
+                    self.log(f"ПРОПУЩЕН  {f.name}: такой же файл уже открыт из {twin.path.parent}")
+                    continue
+                try:
                     raw = load(f)
                 except Exception as e:  # noqa: BLE001
                     self.log(f"ПРОПУЩЕН  {f.name}: не удалось прочитать ({e})")
@@ -360,7 +370,7 @@ class MainWindow:
                     continue
                 kind = "экспорт Fritsch" if raw[0].source == "fritsch" else "таблица"
                 self.log(f"ЗАГРУЖЕН  {f.name}: {len(raw)} изм. ({kind})")
-                self.groups.append(FileGroup(f, raw))
+                self.groups.append(FileGroup(f, raw, sha1=sha))
                 self.st.add_recent(f)
                 loaded += 1
         finally:
@@ -578,14 +588,15 @@ class MainWindow:
                                      ("d43_instrument", "D[4,3] прибора", "{:.2f} мкм")):
                     v = m.get(k)
                     if v is not None:
-                        row(sec, name, fmt.format(v))
+                        row(sec, name, fmt.format(v).replace(".", ",") if k != "model" else fmt.format(v))
             mm = compute(s, self.st.windows_tuples)
             sec = section("Результат")
+            c = lambda v, nd=2: f"{v:.{nd}f}".replace(".", ",")  # noqa: E731
             for k in ("d10", "d50", "d90"):
-                row(sec, k, f"{mm[k]:.2f} мкм")
-            row(sec, "span", f"{mm['span']:.2f}")
-            row(sec, "D[4,3] / D[3,2]", f"{mm['d43']:.2f} / {mm['d32']:.2f} мкм")
-            row(sec, "Конец кривой", f"{s.cum_pct[-1]:.1f} %")
+                row(sec, k, f"{c(mm[k])} мкм")
+            row(sec, "span", c(mm["span"]))
+            row(sec, "D[4,3] / D[3,2]", f"{c(mm['d43'])} / {c(mm['d32'])} мкм")
+            row(sec, "Конец кривой", f"{c(s.cum_pct[-1], 1)} %")
             notes = [(f[0], f[1]) for f in s.flags]
 
         t = self.notes
