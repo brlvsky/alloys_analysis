@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import datetime as dt
+import queue
 import sys
+import threading
 import time
 import tkinter as tk
 import traceback
@@ -21,6 +23,9 @@ from ..core.settings import Settings, app_base_dir, data_dir, resource_dir
 from . import theme
 from .dialogs.about import AboutDialog, Splash
 from .dialogs.settings_dialog import SettingsDialog
+from ..core import db
+from .dialogs.structure import StructureWindow
+from .tabs.database import DatabaseTab
 from .tabs.modules import PopulationsTab, SurfaceTab, TechTab
 from .tabs.placeholder import PlaceholderTab
 from .tabs.plot_panel import PlotPanel
@@ -42,10 +47,16 @@ class FileGroup:
 
 
 class MainWindow:
-    def __init__(self, root: tk.Tk, settings: Settings, save_settings=True):
+    def __init__(self, root: tk.Tk, settings: Settings, save_settings=True, db_file: Path | None = None):
         self.root = root
         self.st = settings
         self.save_settings = save_settings
+        self.db_path = Path(db_file) if db_file else db.db_path(data_dir())
+        self.db = db.connect(self.db_path)
+        self._db_jobs: queue.Queue = queue.Queue()
+        self._db_done: queue.Queue = queue.Queue()
+        self._db_pending = 0
+        self._db_thread = None
         self.groups: list[FileGroup] = []
         self.items: dict[str, Sample] = {}          # iid дерева → образец
         self.file_items: dict[str, FileGroup] = {}  # iid файла → группа
@@ -134,11 +145,16 @@ class MainWindow:
             if name in ("База данных", "Методика"):
                 continue
             m.add_command(label=name, underline=0, command=lambda i=i: self.nb.select(i))
+        m.add_separator()
+        m.add_command(label="Структура — свойства…", underline=1, command=self.open_structure)
         mb.add_cascade(label="Анализ", underline=0, menu=m)
 
         m = tk.Menu(mb, tearoff=0)
         m.add_command(label="Открыть базу данных", underline=0, command=lambda: self.nb.select(TABS.index("База данных")))
-        m.add_command(label="Экспорт базы в Excel…", underline=0, state="disabled")
+        m.add_command(label="Структура — свойства…", underline=0, command=self.open_structure)
+        m.add_separator()
+        m.add_command(label="Импортировать открытые файлы в базу", underline=0, command=self.import_all_to_db)
+        m.add_command(label="Экспорт базы в Excel…", underline=0, command=self.export_db)
         mb.add_cascade(label="База", underline=0, menu=m)
 
         m = tk.Menu(mb, tearoff=0)
@@ -249,7 +265,7 @@ class MainWindow:
         self.summary = SummaryTab(self.nb, on_select=self.on_summary_select,
                                   icon=lambda lv: theme.load_icon(self.root, FLAG_ICON[lv]))
         self.mod_tabs = {"Популяции": PopulationsTab(self.nb, self), "Технология": TechTab(self.nb, self),
-                         "Поверхность": SurfaceTab(self.nb, self)}
+                         "Поверхность": SurfaceTab(self.nb, self), "База данных": DatabaseTab(self.nb, self)}
         tabs = {"Распределение": dist_tab, "Сравнение": self.cmp, "Сводка": self.summary, **self.mod_tabs}
         for name in TABS:
             w = tabs.get(name) or PlaceholderTab(self.nb, name)
@@ -319,7 +335,8 @@ class MainWindow:
         self.status.set(1, f"Образцов: {len(allv)} (выбрано {len(en)})")
         nflag = sum(1 for s in en if any(f[0] in ("ERROR", "WARN") for f in s.flags))
         self.status.set(2, f"Флаги: {nflag}")
-        self.status.set(3, f"Данные: {data_dir()}")
+        busy = f" (импорт: {self._db_pending})" if getattr(self, "_db_pending", 0) else ""
+        self.status.set(3, f"База: {getattr(self, 'db_path', data_dir())}{busy}")
 
     # ================================================================ данные
     def all_samples(self) -> list[Sample]:
@@ -374,6 +391,7 @@ class MainWindow:
                 kind = "экспорт Fritsch" if raw[0].source == "fritsch" else "таблица"
                 self.log(f"ЗАГРУЖЕН  {f.name}: {len(raw)} изм. ({kind})")
                 self.groups.append(FileGroup(f, raw, sha1=sha))
+                self.queue_db_import(self.groups[-1])
                 self.st.add_recent(f)
                 loaded += 1
         finally:
@@ -665,6 +683,91 @@ class MainWindow:
             except Exception as e:  # noqa: BLE001 — модуль не должен ронять программу
                 self.log(f"ОШИБКА модуля «{cur}»: {e}")
 
+    # ================================================================ база данных (фоновый импорт)
+    def queue_db_import(self, g: FileGroup):
+        """Импорт исходных измерений файла в базу — в фоновом потоке (популяции считаются ~1 с на образец)."""
+        import copy
+
+        self._db_pending += 1
+        # копии: переименование в окне во время импорта не должно попадать в базу наполовину
+        self._db_jobs.put((g.path, copy.deepcopy(g.raw), g.sha1, copy.deepcopy(self.st)))
+        if self._db_thread is None or not self._db_thread.is_alive():
+            self._db_thread = threading.Thread(target=self._db_worker, daemon=True)
+            self._db_thread.start()
+            self.root.after(300, self._poll_db)
+        self.update_status()
+
+    def _db_worker(self):
+        conn = db.connect(self.db_path)   # у потока своё соединение
+        while True:
+            try:
+                job = self._db_jobs.get(timeout=2)
+            except queue.Empty:
+                break
+            path, raw, sha, st = job
+            try:
+                n = db.import_samples(conn, raw, sha, st)
+                self._db_done.put((path, n, None))
+            except Exception as e:  # noqa: BLE001
+                self._db_done.put((path, 0, e))
+        conn.close()
+
+    def _poll_db(self):
+        changed = False
+        while True:
+            try:
+                path, n, err = self._db_done.get_nowait()
+            except queue.Empty:
+                break
+            self._db_pending -= 1
+            changed = True
+            if err:
+                self.log(f"БАЗА      {path.name}: ошибка импорта ({err})")
+            elif n:
+                self.log(f"БАЗА      {path.name}: добавлено измерений: {n}")
+            else:
+                self.log(f"БАЗА      {path.name}: уже в базе")
+        if changed:
+            self.update_status()
+            if TABS[self.nb.index("current")] == "База данных":
+                self.mod_tabs["База данных"].refresh()
+        if self._db_pending > 0 or (self._db_thread and self._db_thread.is_alive()):
+            self.root.after(300, self._poll_db)
+
+    def wait_db(self, timeout=300.0):
+        """Дождаться окончания фонового импорта (для самопроверки и тестов)."""
+        t0 = time.time()
+        while self._db_pending > 0 and time.time() - t0 < timeout:
+            self.root.update()
+            time.sleep(0.05)
+            self._poll_db()
+
+    def import_all_to_db(self):
+        for g in self.groups:
+            self.queue_db_import(g)
+
+    def open_structure(self):
+        StructureWindow(self)
+
+    def export_db(self):
+        p = self._ask_save("Экспорт базы в Excel", "База PSD-Lab.xlsx", ".xlsx", [("Excel", "*.xlsx")])
+        if p:
+            try:
+                db.export_xlsx(self.db, p)
+            except PermissionError:
+                messagebox.showerror(APP_NAME, f"Не удалось записать {p.name}: файл открыт в Excel?", parent=self.root)
+                return
+            self.log(f"База выгружена в {p}")
+
+    def batches_for(self, samples) -> list[dict]:
+        names = list(dict.fromkeys(s.name for s in samples))
+        out = []
+        for n in names:
+            r = self.db.execute("SELECT * FROM batches WHERE name=?", (n,)).fetchone()
+            if r:
+                out.append(dict(r))
+        return out
+
     def busy(self, on: bool):
         self.root.configure(cursor="watch" if on else "")
         self.root.update_idletasks()
@@ -823,7 +926,8 @@ class MainWindow:
             write_html(self.enabled_samples(), path, windows=self.st.windows_tuples, lang=self.st.lang,
                        bin_um=self.st.bin_um, xmax=self.st.xmax, independent_axes=self.st.independent_axes,
                        show_name=self.st.show_name, log_x=self.st.compare_log,
-                       files=[g.path for g in self.groups], st=self.st)
+                       files=[g.path for g in self.groups], st=self.st,
+                       batches=self.batches_for(self.enabled_samples()))
         finally:
             self.root.configure(cursor="")
         self.log(f"Сохранён отчёт {path}")
@@ -940,6 +1044,10 @@ class MainWindow:
         if self.save_settings:
             self.remember_window()
         self._save_settings()
+        try:
+            self.db.close()
+        except Exception:  # noqa: BLE001
+            pass
         self.root.destroy()
         if restart:
             import subprocess
@@ -1023,7 +1131,10 @@ def run_selftest(win: MainWindow, out: Path, splash_shot: Path | None) -> int:
     say(f"SELFTEST: {APP_NAME} {__version__}, масштаб {theme.SCALE['total'] * 100:.0f} %, папка примеров: {raw}")
     shots.append(grab(root, out / "00_Начало.png"))
     win.load_paths([raw])
+    win.wait_db()
     n = len(win.all_samples())
+    nb = win.db.execute("SELECT COUNT(*) FROM measurements").fetchone()[0]
+    say(f"SELFTEST: в базе измерений: {nb}")
     say(f"SELFTEST: загружено образцов: {n}")
     # выбрать бимодальный образец, если он есть — на нём лучше видно графики
     for sid, s in win.items.items():
@@ -1042,12 +1153,18 @@ def run_selftest(win: MainWindow, out: Path, splash_shot: Path | None) -> int:
                 shots.append(grab(root, out / f"{i + 1:02d}{chr(97 + j)}_{safe_filename(name)}.png"))
             inner.select(0)
     win.nb.select(0)
-    for name, cls in (("settings", lambda: SettingsDialog(root, win.st)), ("about", lambda: AboutDialog(root))):
-        d = cls()
-        from .widgets import center_on
+    from .dialogs.record import RecordDialog
+    from .widgets import center_on
 
+    bid = win.db.execute("SELECT id FROM batches ORDER BY id LIMIT 1").fetchone()[0]
+    dialogs = (("settings", lambda: SettingsDialog(root, win.st)), ("about", lambda: AboutDialog(root)),
+               ("print_job", lambda: RecordDialog(root, win.db, "print_jobs", "Печать: новая запись", batch_id=bid)),
+               ("structure", lambda: StructureWindow(win)))
+    for name, cls in dialogs:
+        d = cls()
         center_on(d, root)
         d.deiconify()
+        root.update()
         shots.append(grab(d, out / f"dlg_{name}.png"))
         d.destroy()
     for p in shots:
@@ -1075,7 +1192,12 @@ def run_gui(files=None, selftest=False, out=None) -> int:
     splash = Splash(root) if (settings.splash or selftest) else None
     if splash:
         root.update()
-    win = MainWindow(root, settings, save_settings=not selftest)
+    db_file = None
+    if selftest:   # самопроверка не трогает базу пользователя
+        db_file = out_dir / "selftest.sqlite"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        db_file.unlink(missing_ok=True)
+    win = MainWindow(root, settings, save_settings=not selftest, db_file=db_file)
 
     def start():
         shot = None

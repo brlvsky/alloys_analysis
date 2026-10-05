@@ -166,3 +166,13 @@ def xlsx_sheets(wb, samples, st, head_font, head_fill) -> None:
     ws = sheet("Поверхность", head, rows, [26, 11, 10] + [13] * (len(head) - 3))
     ws.append([])
     ws.append([f"ρ = {rho:g} г/см³. " + surface.ASSUMPTIONS])
+
+
+def batches_section(batches: list[dict], n: int) -> list[str]:
+    """Таблица партий из базы «структура — свойства»."""
+    rows = [[b["name"], b.get("alloy") or "—", b.get("state") or "—", b.get("additive") or "—",
+             _c(b.get("additive_wt_pct"), 1) if b.get("additive_wt_pct") is not None else "—",
+             b.get("route") or "—", b.get("notes") or ""] for b in batches]
+    return [f"<h2>{n}. Партии (база данных «структура — свойства»)</h2>",
+            _table(["Партия", "Сплав", "Состояние", "Добавка", "мас.%", "Маршрут получения", "Примечания"], rows,
+                   num_from=99)]

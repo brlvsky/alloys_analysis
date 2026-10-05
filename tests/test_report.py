@@ -45,3 +45,18 @@ def test_settings_roundtrip(tmp_path):
     s.save(tmp_path / "settings.json")
     s2 = Settings.load(tmp_path / "settings.json")
     assert s2.lang == "ru" and s2.bin_um == 2.0 and s2.recent_files == ["C:/данные/Расчет.xlsx"]
+
+
+def test_batch_with_database(tmp_path):
+    if not (RAW / "N_C_.xls").exists():
+        pytest.skip("нет исходных файлов")
+    dbf = tmp_path / "база.sqlite"
+    run_batch(RAW, tmp_path / "out", Settings(), log=lambda *_: None, db_file=dbf)
+    html = (tmp_path / "out" / "report.html").read_text(encoding="utf-8")
+    assert "Партии (база данных" in html and "уточнить" in html
+    from psd_lab.core import db
+
+    conn = db.connect(dbf)
+    assert conn.execute("SELECT COUNT(*) FROM measurements").fetchone()[0] == 16
+    run_batch(RAW, tmp_path / "out2", Settings(), log=lambda *_: None, db_file=dbf)   # повтор — без дублей
+    assert conn.execute("SELECT COUNT(*) FROM measurements").fetchone()[0] == 16

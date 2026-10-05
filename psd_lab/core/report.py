@@ -183,7 +183,8 @@ ul.flags li{margin:3px 0}
 
 
 def write_html(samples: list[Sample], path: Path, *, windows, lang="en", bin_um=None, xmax=None,
-               independent_axes=False, show_name=True, log_x=True, files=None, skipped=None, st=None) -> Path:
+               independent_axes=False, show_name=True, log_x=True, files=None, skipped=None, st=None,
+               batches=None) -> Path:
     files = files or sorted({s.file for s in samples})
     now = dt.datetime.now().strftime("%d.%m.%Y %H:%M")
     cols = summary_columns(windows)
@@ -262,6 +263,10 @@ def write_html(samples: list[Sample], path: Path, *, windows, lang="en", bin_um=
         from .report_modules import html_sections
 
         h += html_sections(samples, st, fig, _fig_b64, start=5)
+    if batches:
+        from .report_modules import batches_section
+
+        h += batches_section(batches, 9 if st is not None else 5)
 
     if skipped:
         h.append("<h2>Пропущенные файлы</h2><ul>")
@@ -310,7 +315,7 @@ def load_many(paths, average=True, log=print) -> BatchResult:
     return res
 
 
-def run_batch(src, out, settings=None, log=print) -> BatchResult:
+def run_batch(src, out, settings=None, log=print, db_file=None) -> BatchResult:
     from .settings import Settings
 
     st = settings or Settings()
@@ -319,6 +324,17 @@ def run_batch(src, out, settings=None, log=print) -> BatchResult:
     if not res.samples:
         log("Нет данных для обработки.")
         return res
+    batches = None
+    if db_file:
+        from . import db, file_sha1
+
+        conn = db.connect(db_file)
+        for f in res.files:
+            n = db.import_samples(conn, load(f), file_sha1(f), st)
+            log(f"БАЗА      {Path(f).name}: добавлено измерений: {n}" if n else f"БАЗА      {Path(f).name}: уже в базе")
+        names = list(dict.fromkeys(s.name for s in res.samples))
+        batches = [dict(r) for n in names for r in conn.execute("SELECT * FROM batches WHERE name=?", (n,))]
+        conn.close()
     groups = [(g[0].file, g) for g in _groups(res.samples)]
     made = plot_all(groups, out, lang=st.lang, bin_um=st.bin_um, xmax=st.xmax,
                     independent_axes=st.independent_axes, show_name=st.show_name, log_x=st.compare_log)
@@ -329,6 +345,6 @@ def run_batch(src, out, settings=None, log=print) -> BatchResult:
     res.outputs.append(write_html(res.samples, out / "report.html", windows=st.windows_tuples, lang=st.lang,
                                   bin_um=st.bin_um, xmax=st.xmax, independent_axes=st.independent_axes,
                                   show_name=st.show_name, log_x=st.compare_log, files=res.files,
-                                  skipped=res.skipped, st=st))
+                                  skipped=res.skipped, st=st, batches=batches))
     log(f"Отчёт: {out / 'report.html'}; таблица: {out / 'summary.xlsx'}")
     return res

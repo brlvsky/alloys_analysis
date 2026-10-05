@@ -24,6 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--bin", type=float, help="ширина столбика, мкм (по умолчанию шаг сетки)")
     p.add_argument("--xmax", type=float, help="предел оси X, мкм")
     p.add_argument("--no-average", action="store_true", help="не усреднять повторы")
+    p.add_argument("--no-db", action="store_true", help="в пакетном режиме не импортировать измерения в базу")
     p.add_argument("--selftest", action="store_true",
                    help="загрузить data/raw, пройти по вкладкам, сохранить скриншоты в out/screens и закрыться")
     return p
@@ -52,7 +53,13 @@ def main(argv=None) -> int:
             print(msg)
             lines.append(msg)
 
-        res = run_batch(Path(args.batch), out, st, log=log)
+        db_file = None
+        if not args.no_db:
+            from .core.db import db_path
+            from .core.settings import data_dir
+
+            db_file = db_path(data_dir())
+        res = run_batch(Path(args.batch), out, st, log=log, db_file=db_file)
         out.mkdir(parents=True, exist_ok=True)
         (out / "batch_log.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
         return 0 if res.samples else 1

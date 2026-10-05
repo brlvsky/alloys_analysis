@@ -19,7 +19,10 @@ def win():
     from psd_lab.gui.main_window import MainWindow
 
     theme.apply(root)
-    w = MainWindow(root, Settings(), save_settings=False)
+    import tempfile
+
+    w = MainWindow(root, Settings(), save_settings=False,
+                   db_file=Path(tempfile.mkdtemp()) / "тест.sqlite")
     yield w
     root.destroy()
 
@@ -107,3 +110,27 @@ def test_module_tabs(win):
     assert tech.yield_bar.values[0].cget("text") != "—"
     surf = win.mod_tabs["Поверхность"]
     assert "91,9 % поверхности" in surf.headline.cget("text")
+
+
+def test_database_tab_and_structure(win):
+    from psd_lab.core import db
+    from psd_lab.gui.dialogs.structure import StructureWindow
+    from psd_lab.gui.main_window import TABS
+
+    win.wait_db()
+    assert win.db.execute("SELECT COUNT(*) FROM measurements").fetchone()[0] == 16
+    win.nb.select(TABS.index("База данных"))
+    win.root.update()
+    tab = win.mod_tabs["База данных"]
+    assert len(tab.blist.tree.get_children()) == 12
+    bid = tab.batch_id
+    db.insert(win.db, "chem", {"O_ppm": "1100"}, bid)
+    tab.changed()
+    assert len(tab.panels["chem"].grid_.tree.get_children()) == 1
+    w = StructureWindow(win)
+    win.root.update()
+    keys = [k for k, _ in w.fields]
+    w.cy.current(keys.index("chem.O_ppm"))
+    w.redraw()
+    assert len(w.table.tree.get_children()) == 1      # одна партия с химанализом
+    w.destroy()
