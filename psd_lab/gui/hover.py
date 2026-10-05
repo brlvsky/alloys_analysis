@@ -63,29 +63,30 @@ def _interp(x, xs, ys):
 
 
 # ==================================================================== графики
-def distribution(s, ax, ax2, width):
-    """Столбики Q и кривая ΣQ: размер, ΣQ в точке, Q в столбике под курсором (столбик подсвечивается)."""
+def distribution(s, ax, ax2, edges, heights, log_x=False):
+    """Столбики Q и кривая ΣQ: размер, ΣQ в точке, Q в столбике под курсором (столбик подсвечивается).
+    edges, heights — как на графике (plots.sample_bins); на лог. оси высота — Q на 1/10 декады."""
     from ..core.metrics import cum_at
-    from ..core.plots import binned
-
-    edges, q = binned(s, width)
 
     def fn(ev):
         p = data_xy(ax, ev)
         if p is None:
             return None
         x = float(p[0])
-        if x < 0 or x > edges[-1]:
+        if x < edges[0] or x > edges[-1] or (log_x and x <= 0):
             return None
         c = cum_at(s, x)
-        i = int(np.clip(np.searchsorted(edges, x, side="right") - 1, 0, len(q) - 1))
+        i = int(np.clip(np.searchsorted(edges, x, side="right") - 1, 0, len(heights) - 1))
         e0, e1 = edges[i], edges[i + 1]
-        return HoverInfo(
-            f"Размер {size_fmt(x)} мкм",
-            [("#000000", f"ΣQ = {n(c)} %  — частиц мельче {size_fmt(x)} мкм"),
-             ("#b0b0b0", f"Q = {n(q[i], 2)} %  — в интервале {n(e0, 1)}–{n(e1, 1)} мкм"),
-             (None, f"крупнее — {n(100 - c)} %")],
-            vlines=[(ax, x)], points=[(ax2, x, c, "#ffff00")], rects=[(ax, e0, 0, e1 - e0, q[i])])
+        q = cum_at(s, e1) - cum_at(s, e0)
+        rows = [("#000000", f"ΣQ = {n(c)} %  — частиц мельче {size_fmt(x)} мкм"),
+                ("#b0b0b0", f"Q = {n(q, 2)} %  — в интервале {size_fmt(e0)}–{size_fmt(e1)} мкм")]
+        if log_x and abs(heights[i] - q) > 0.005:
+            rows.append((None, f"на 1/10 декады: {n(heights[i], 2)} % (интервал объединён: внутри "
+                               f"нет точек прибора)"))
+        rows.append((None, f"крупнее — {n(100 - c)} %"))
+        return HoverInfo(f"Размер {size_fmt(x)} мкм", rows,
+                         vlines=[(ax, x)], points=[(ax2, x, c, "#ffff00")], rects=[(ax, e0, 0, e1 - e0, heights[i])])
     return fn
 
 

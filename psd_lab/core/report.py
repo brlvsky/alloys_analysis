@@ -159,7 +159,8 @@ LEGEND = ("ΣQ — накопленная объёмная доля частиц
 
 
 def build_blocks(samples: list[Sample], *, windows, lang="en", bin_um=None, xmax=None, independent_axes=False,
-                 show_name=True, log_x=True, files=None, skipped=None, st=None, batches=None, qc=None) -> list:
+                 show_name=True, log_x=True, files=None, skipped=None, st=None, batches=None, qc=None,
+                 dist_log=None) -> list:
     """Содержание отчёта — список блоков (report_doc). Из него делаются и HTML, и Word."""
     from .report_doc import Bullets, Flags, Heading, Image, Note, Para, Table, fig_png
 
@@ -220,11 +221,13 @@ def build_blocks(samples: list[Sample], *, windows, lang="en", bin_um=None, xmax
     # По образцам
     b.append(Heading("4. Распределения по образцам"))
     for grp in groups:
-        shared = (None, None) if independent_axes else common_axes(grp, bin_um, xmax)
+        if dist_log is None:
+            dist_log = bool(getattr(st, "dist_log", False))
+        shared = (None, None, None) if independent_axes else common_axes(grp, bin_um, xmax, dist_log)
         b.append(Heading(f"Файл {Path(grp[0].file).name}", 3))
         for s in grp:
             draw_sample(fig, s, lang=lang, bin_um=bin_um, xmax=xmax or shared[0], ymax=shared[1],
-                        show_name=show_name)
+                        show_name=show_name, log_x=dist_log, xmin=shared[2])
             m = compute(s, windows)
             text = (f" — d10 {_fmt(m['d10'])}, d50 {_fmt(m['d50'])}, d90 {_fmt(m['d90'])} мкм; "
                     f"D[4,3] {_fmt(m['d43'])} мкм")
@@ -345,7 +348,8 @@ def run_batch(src, out, settings=None, log=print, db_file=None) -> BatchResult:
         conn.close()
     groups = [(g[0].file, g) for g in _groups(res.samples)]
     made = plot_all(groups, out, lang=st.lang, bin_um=st.bin_um, xmax=st.xmax,
-                    independent_axes=st.independent_axes, show_name=st.show_name, log_x=st.compare_log)
+                    independent_axes=st.independent_axes, show_name=st.show_name, log_x=st.compare_log,
+                    dist_log=st.dist_log)
     res.outputs += [p for _, p in made]
     log(f"Графики: {len(made)} PNG в {out}")
     log("Модули: популяции, окна печати, выход годного, поверхность…")

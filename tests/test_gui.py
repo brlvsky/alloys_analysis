@@ -315,3 +315,24 @@ def test_help_window(win):
     assert len(w.text.image_names()) >= 3            # значки флагов в тексте
     assert win.help() is w                           # второе окно не создаётся
     w.destroy()
+
+
+def test_distribution_log_axis(win):
+    """Вид → Логарифмическая ось X распределения: ось и подсказка работают, настройка сохраняется."""
+    if not win.all_samples():
+        win.load_paths([RAW])
+    win.nb.select(0)
+    win.v_dlog.set(True)
+    win.on_view_option()
+    win.root.update()
+    try:
+        assert win.st.dist_log
+        ax = win.dist.figure.axes[0]
+        assert ax.get_xscale() == "log"
+        info = win.dist.hover_at(ax, 10, 1)
+        assert info is not None and info.title.startswith("Размер 10")
+        assert any("ΣQ" in r[1] for r in info.rows)
+    finally:
+        win.v_dlog.set(False)
+        win.on_view_option()
+    assert win.dist.figure.axes[0].get_xscale() == "linear"

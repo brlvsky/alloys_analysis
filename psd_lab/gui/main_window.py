@@ -143,6 +143,7 @@ class MainWindow:
         self.v_shared = tk.BooleanVar(value=not self.st.independent_axes)
         self.v_name = tk.BooleanVar(value=self.st.show_name)
         self.v_logx = tk.BooleanVar(value=self.st.compare_log)
+        self.v_dlog = tk.BooleanVar(value=self.st.dist_log)
         self.v_labels = tk.BooleanVar(value=self.st.toolbar_labels)
         self.v_scale = tk.DoubleVar(value=self.st.ui_scale or 0)
 
@@ -188,6 +189,8 @@ class MainWindow:
         m.add_checkbutton(label="Усреднять повторы", underline=0, variable=self.v_avg, command=self.on_view_option)
         m.add_checkbutton(label="Одинаковые оси в файле", underline=0, variable=self.v_shared, command=self.on_view_option)
         m.add_checkbutton(label="Название на графике", underline=0, variable=self.v_name, command=self.on_view_option)
+        m.add_checkbutton(label="Логарифмическая ось X распределения", underline=4, variable=self.v_dlog,
+                          command=self.on_view_option)
         m.add_checkbutton(label="Логарифмическая ось X сравнения", underline=0, variable=self.v_logx,
                           command=self.on_view_option)
         m.add_separator()
@@ -319,7 +322,8 @@ class MainWindow:
         dist_tab = tk.Frame(self.nb, background=theme.FACE)
         self.welcome = WelcomePanel(dist_tab, self.open_files, self.open_folder, self.open_examples,
                                     lambda p: self.load_paths([p]))
-        self.dist = PlotPanel(dist_tab, "Распределение", on_save=self.export_png_current)
+        self.dist = PlotPanel(dist_tab, "Распределение", on_save=self.export_png_current,
+                              extra=self._dist_toolbar)
         self.readouts = ReadoutBar(self.dist, "Результаты (размеры — мкм, доли — % объёма)")
         self.readouts.pack(fill="x", side="bottom", before=self.dist.plot_frame)
         self.cmp_tab = tk.Frame(self.nb, background=theme.FACE)
@@ -342,6 +346,13 @@ class MainWindow:
         self.nb.bind("<<NotebookTabChanged>>", lambda e: self.refresh_tab())
         pw.add(right, weight=1)
         self.refresh_dist()
+
+    def _dist_toolbar(self, tb):
+        cb = tk.Checkbutton(tb, text="Логарифмическая ось X", variable=self.v_dlog, command=self.on_view_option,
+                            background=theme.FACE, activebackground=theme.FACE)
+        cb.pack(side="left", padx=theme.px(4))
+        Tooltip(cb, "Ось размеров в логарифмическом масштабе. Столбики — доли в логарифмических интервалах\n"
+                    "(1/10 декады); где у прибора нет точек, интервалы объединены. Действует и на экспорт.")
 
     def _compare_toolbar(self, tb):
         tk.Checkbutton(tb, text="Логарифмическая ось X", variable=self.v_logx, command=self.on_view_option,
@@ -1034,12 +1045,17 @@ class MainWindow:
             return
         self._show_welcome(False)
         grp = next((g.shown for g in self.groups if s in g.shown), [s])
-        xm, ym = (None, None) if self.st.independent_axes else common_axes(grp, self.st.bin_um, self.st.xmax)
+        log = self.st.dist_log
+        xm, ym, xlo = (None, None, None) if self.st.independent_axes else \
+            common_axes(grp, self.st.bin_um, self.st.xmax, log)
         ax, ax2 = draw_sample(self.dist.figure, s, lang=self.st.lang, bin_um=self.st.bin_um,
-                              xmax=self.st.xmax or xm, ymax=ym, show_name=self.st.show_name, font_scale=0.9)
-        from ..core.plots import grid_step
+                              xmax=self.st.xmax or xm, ymax=ym, show_name=self.st.show_name, font_scale=0.9,
+                              log_x=log, xmin=xlo)
+        from ..core.plots import sample_bins
 
-        self.dist.set_hover(hover.distribution(s, ax, ax2, self.st.bin_um or grid_step(s)))
+        lo, hi = ax.get_xlim()
+        edges, heights = sample_bins(s, bin_um=self.st.bin_um, log_x=log, xmin=lo if log else None, xmax=hi)
+        self.dist.set_hover(hover.distribution(s, ax, ax2, edges, heights, log))
         self.dist.set_title(f"Распределение — {s.label}")
         self.dist.draw()
         self.update_readouts(s)
@@ -1109,6 +1125,7 @@ class MainWindow:
         self.st.independent_axes = not self.v_shared.get()
         self.st.show_name = self.v_name.get()
         self.st.compare_log = self.v_logx.get()
+        self.st.dist_log = self.v_dlog.get()
         if avg_changed:
             self.rebuild()
         else:
@@ -1162,9 +1179,10 @@ class MainWindow:
         p = self._ask_save("Сохранить график", safe_filename(s.name) + ".png", ".png", [("PNG", "*.png")])
         if p:
             grp = next((g.shown for g in self.groups if s in g.shown), [s])
-            xm, ym = (None, None) if self.st.independent_axes else common_axes(grp, self.st.bin_um, self.st.xmax)
+            xm, ym, xlo = (None, None, None) if self.st.independent_axes else \
+                common_axes(grp, self.st.bin_um, self.st.xmax, self.st.dist_log)
             plot_sample(s, p, lang=self.st.lang, bin_um=self.st.bin_um, xmax=self.st.xmax or xm, ymax=ym,
-                        show_name=self.st.show_name)
+                        show_name=self.st.show_name, log_x=self.st.dist_log, xmin=xlo)
             self.log(f"Сохранён {p}")
 
     def export_png_all(self, out: Path | None = None):
@@ -1175,7 +1193,7 @@ class MainWindow:
             return
         made = plot_all([(g[0].file, g) for g in self.enabled_groups()], out, lang=self.st.lang,
                         bin_um=self.st.bin_um, xmax=self.st.xmax, independent_axes=self.st.independent_axes,
-                        show_name=self.st.show_name, log_x=self.st.compare_log)
+                        show_name=self.st.show_name, log_x=self.st.compare_log, dist_log=self.st.dist_log)
         self.log(f"Сохранено PNG: {len(made)} в {out}")
         self.update_status(f"Сохранено PNG: {len(made)}")
 
@@ -1201,7 +1219,8 @@ class MainWindow:
         en = self.enabled_samples()
         return dict(windows=self.st.windows_tuples, lang=self.st.lang, bin_um=self.st.bin_um, xmax=self.st.xmax,
                     independent_axes=self.st.independent_axes, show_name=self.st.show_name,
-                    log_x=self.st.compare_log, files=[g.path for g in self.groups], st=self.st,
+                    log_x=self.st.compare_log, dist_log=self.st.dist_log, files=[g.path for g in self.groups],
+                    st=self.st,
                     batches=self.batches_for(en), qc=self.qc_labels(en))
 
     def _write_report(self, writer, path: Path, what: str, opener: str, ask_open: bool):
@@ -1465,6 +1484,14 @@ def run_selftest(win: MainWindow, out: Path, splash_shot: Path | None) -> int:
             root.update()
             hover_demo[name]()
             shots.append(grab(root, out / f"{i + 1:02d}h_{safe_filename(name)}_наведение.png"))
+        if name == "Распределение":   # логарифмическая ось
+            win.v_dlog.set(True)
+            win.on_view_option()
+            root.update()
+            win.dist.hover_at(win.dist.figure.axes[0], 10, 1)
+            shots.append(grab(root, out / f"{i + 1:02d}b_{safe_filename(name)}_лог_ось.png"))
+            win.v_dlog.set(False)
+            win.on_view_option()
         if name == "Сравнение":   # режим «до и после»
             labels = [s.label for s in win.all_samples()]
             pa = next((x for x in labels if x.startswith("N/C (")), labels[0])

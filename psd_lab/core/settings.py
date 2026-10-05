@@ -60,6 +60,7 @@ class Settings:
     show_name: bool = True           # название образца в рамке
     average: bool = True             # усреднять повторы
     compare_log: bool = True         # логарифмическая ось X на сравнении
+    dist_log: bool = False           # логарифмическая ось X на графике распределения (столбики — лог. интервалы)
     compare_mode: str = "all"        # сравнение: all — все отмеченные, pair — два образца «до и после»
     compare_pair: list = field(default_factory=list)   # [подпись A, подпись B]
     windows: list = field(default_factory=lambda: [[None, 15], [15, 45], [15, 53], [45, 105], [53, None]])

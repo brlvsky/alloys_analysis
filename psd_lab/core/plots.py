@@ -23,8 +23,10 @@ SERIES_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300
 LINESTYLES = ["-", "--", ":", "-."]
 
 TEXT = {
-    "en": {"x": "Size, μm", "q": "Q, %", "cum": "ΣQ, %", "step": "bin {w:g} μm"},
-    "ru": {"x": "Размер, мкм", "q": "Q, %", "cum": "ΣQ, %", "step": "шаг {w:g} мкм"},
+    "en": {"x": "Size, μm", "q": "Q, %", "cum": "ΣQ, %", "step": "bin {w:g} μm",
+           "logbin": "per 1/{n} decade"},
+    "ru": {"x": "Размер, мкм", "q": "Q, %", "cum": "ΣQ, %", "step": "шаг {w:g} мкм",
+           "logbin": "на 1/{n} декады"},
 }
 
 matplotlib.rcParams["font.family"] = "DejaVu Sans"
@@ -63,6 +65,49 @@ def binned(s: Sample, width: float):
     return edges, np.diff(cum)
 
 
+LOG_PER_DECADE = 10   # логарифмические интервалы столбиков на логарифмической оси
+
+
+def log_bins(s: Sample, x_lo: float, x_hi: float, per_decade: int = LOG_PER_DECADE):
+    """Логарифмические интервалы для лог. оси: (границы, высота столбика — Q, % на 1/per_decade декады).
+
+    Границы кратны декаде (1; 1,26; 1,58; …). Интервал, внутри которого нет ни одной точки сетки прибора
+    (мелкие размеры: сетка 0,1 → 1 → 2 мкм), объединяется со следующим — иначе столбики показывали бы
+    интерполяцию, а не измерение. Высота = Q в интервале / его ширина в долях декады·per_decade, поэтому
+    широкий объединённый столбик не завышается; для обычного интервала высота = Q, %. Без перенормировки:
+    Σ высота·ширина = ΣQ(x_hi) − ΣQ(x_lo)."""
+    k0 = int(np.floor(np.log10(x_lo) * per_decade + 1e-9))
+    k1 = int(np.ceil(np.log10(x_hi) * per_decade - 1e-9))
+    grid = 10.0 ** (np.arange(k0, k1 + 1) / per_decade)
+    nodes = s.size_um[s.size_um > 0]
+    edges = [grid[0]]
+    for e in grid[1:-1]:
+        # точка сетки у самой границы (2,0 мкм при границе 10^0,3 = 1,995) считается внутри интервала
+        if np.any((nodes > edges[-1] * 1.01) & (nodes <= e * 1.01)):
+            edges.append(e)
+    edges.append(grid[-1])
+    edges = np.array(edges)
+    q = np.diff(np.interp(edges, s.size_um, s.cum_pct))
+    width = np.diff(np.log10(edges)) * per_decade
+    return edges, q / width
+
+
+def x_low(s: Sample) -> float:
+    """Левая граница логарифмической оси: степень 10 ниже ~0,3 % кумулятивы (и не ниже первой точки сетки)."""
+    first = float(s.size_um[s.size_um > 0][0]) if (s.size_um > 0).any() else 0.1
+    d = d_at(s, 0.3)
+    base = max(first, d / 1.5 if np.isfinite(d) else first)
+    return 10.0 ** math.floor(math.log10(base))
+
+
+def sample_bins(s: Sample, *, bin_um=None, log_x=False, xmin=None, xmax=None):
+    """Столбики графика распределения: (границы, Q, %). Линейная ось — шаг сетки (или bin_um),
+    логарифмическая — логарифмические интервалы."""
+    if log_x:
+        return log_bins(s, xmin or x_low(s), xmax or x_limit(s))
+    return binned(s, bin_um or grid_step(s))
+
+
 def x_limit(s: Sample) -> float:
     d99 = d_at(s, 99)
     if not np.isfinite(d99):
@@ -86,13 +131,18 @@ def new_figure(dpi=200):
 
 
 def draw_sample(fig, s: Sample, *, lang="en", bin_um=None, xmax=None, ymax=None, show_name=True,
-                font_scale=1.0):
-    """Рисует на фигуре столбики Q, % и кривую ΣQ, %. Возвращает (ax, ax2)."""
+                font_scale=1.0, log_x=False, xmin=None):
+    """Рисует на фигуре столбики Q, % и кривую ΣQ, %. Возвращает (ax, ax2).
+
+    log_x — логарифмическая ось размеров; столбики тогда — доли в логарифмических интервалах
+    (10 на декаду), иначе на лог. оси столбики шага 1–2 мкм были бы несопоставимой ширины."""
     t = TEXT[lang]
     width = bin_um or grid_step(s)
-    edges, q = binned(s, width)
     xmax = xmax or x_limit(s)
-    ymax = ymax or nice_ceil(q[edges[1:] <= xmax + width].max() * 1.1 if len(q) else 1)
+    xmin = (xmin or x_low(s)) if log_x else 0.0
+    edges, q = sample_bins(s, bin_um=bin_um, log_x=log_x, xmin=xmin, xmax=xmax)
+    vis = edges[:-1] < xmax
+    ymax = ymax or nice_ceil(q[vis].max() * 1.1 if vis.any() else 1)
     fs = 12 * font_scale
 
     fig.clear()
@@ -100,27 +150,42 @@ def draw_sample(fig, s: Sample, *, lang="en", bin_um=None, xmax=None, ymax=None,
     ax.set_facecolor("white")
     # столбики одной коллекцией, а не сотней отдельных прямоугольников: на вид то же самое,
     # но рисуется в разы быстрее (важно для сдвига и масштаба графика в окне)
-    x0 = edges[:-1]
+    x0, x1 = edges[:-1], edges[1:]
     verts = np.stack([np.column_stack([x0, np.zeros_like(q)]), np.column_stack([x0, q]),
-                      np.column_stack([x0 + width, q]), np.column_stack([x0 + width, np.zeros_like(q)])], axis=1)
+                      np.column_stack([x1, q]), np.column_stack([x1, np.zeros_like(q)])], axis=1)
     ax.add_collection(PolyCollection(verts, facecolors=BAR_COLOR, edgecolors="black", linewidths=0.6, zorder=2))
-    ax.set_xlim(0, xmax)
+    if log_x:
+        ax.set_xscale("log")
+        ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}"))
+    ax.set_xlim(xmin, xmax)
     ax.set_ylim(0, ymax)
     ax.grid(True, linestyle="--", color=GRID_COLOR, linewidth=0.6, zorder=0)
     ax.set_axisbelow(True)
 
     ax2 = ax.twinx()
-    ax2.plot(s.size_um, s.cum_pct, color="black", linewidth=1.5, zorder=3)
+    keep = s.size_um > 0 if log_x else np.ones(len(s.size_um), bool)
+    ax2.plot(s.size_um[keep], s.cum_pct[keep], color="black", linewidth=1.5, zorder=3)
     ax2.set_ylim(0, 100)
 
-    q_label = t["q"] if abs(width - 1) < 1e-9 else f"{t['q']} ({t['step'].format(w=width)})"
+    if log_x:
+        q_label = f"{t['q']} ({t['logbin'].format(n=LOG_PER_DECADE)})"
+        below = float(np.interp(xmin, s.size_um, s.cum_pct))
+        if below >= 0.5:   # часть порошка левее оси — не теряем её молча
+            txt = (f"мельче {xmin:g} мкм: {below:.1f} %" if lang == "ru" else f"below {xmin:g} μm: {below:.1f} %")
+            ax.text(0.01, 0.015, txt.replace(".", ",") if lang == "ru" else txt, transform=ax.transAxes,
+                    ha="left", va="bottom", fontsize=fs * 0.8, color="#404040", zorder=6)
+    else:
+        q_label = t["q"] if abs(width - 1) < 1e-9 else f"{t['q']} ({t['step'].format(w=width)})"
     ax.set_xlabel(t["x"], fontstyle="italic", fontsize=fs)
     ax.set_ylabel(q_label, fontstyle="italic", fontsize=fs)
     ax2.set_ylabel(t["cum"], fontstyle="italic", fontsize=fs)
     ax.tick_params(labelsize=fs * 0.85)
     ax2.tick_params(labelsize=fs * 0.85)
     if show_name:
-        ax.text(0.97, 0.80, s.name, transform=ax.transAxes, ha="right", va="top", fontsize=fs * 1.08,
+        # на лог. оси справа обычно крупная мода — подпись слева, чтобы не закрывать столбики
+        x_txt, ha = (0.03, "left") if log_x else (0.97, "right")
+        ax.text(x_txt, 0.80 if not log_x else 0.95, s.name, transform=ax.transAxes, ha=ha, va="top",
+                fontsize=fs * 1.08,
                 bbox=dict(boxstyle="square,pad=0.4", facecolor="white", edgecolor="black", linewidth=0.8),
                 zorder=5)
     fig.tight_layout()
@@ -128,10 +193,11 @@ def draw_sample(fig, s: Sample, *, lang="en", bin_um=None, xmax=None, ymax=None,
 
 
 def plot_sample(s: Sample, path: Path, *, lang="en", bin_um=None, xmax=None, ymax=None,
-                show_name=True) -> Path:
+                show_name=True, log_x=False, xmin=None) -> Path:
     """Сохраняет график образца в PNG (публикационный стиль)."""
     fig = new_figure()
-    draw_sample(fig, s, lang=lang, bin_um=bin_um, xmax=xmax, ymax=ymax, show_name=show_name)
+    draw_sample(fig, s, lang=lang, bin_um=bin_um, xmax=xmax, ymax=ymax, show_name=show_name, log_x=log_x,
+                xmin=xmin)
     return _save(fig, path)
 
 
@@ -142,17 +208,17 @@ def _save(fig, path) -> Path:
     return path
 
 
-def common_axes(samples: list[Sample], bin_um=None, xmax=None):
-    """Общие пределы осей X и Y для группы образцов."""
+def common_axes(samples: list[Sample], bin_um=None, xmax=None, log_x=False):
+    """Общие пределы осей для группы образцов: (xmax, ymax, xmin); xmin — для логарифмической оси."""
     xm = xmax or max(x_limit(s) for s in samples)
+    xlo = min(x_low(s) for s in samples) if log_x else None
     ym = 0.0
     for s in samples:
-        w = bin_um or grid_step(s)
-        edges, q = binned(s, w)
+        edges, q = sample_bins(s, bin_um=bin_um, log_x=log_x, xmin=xlo, xmax=xm)
         sel = edges[:-1] < xm
         if sel.any():
             ym = max(ym, q[sel].max())
-    return xm, nice_ceil(ym * 1.1)
+    return xm, nice_ceil(ym * 1.1), xlo
 
 
 # ---------------------------------------------------------------- сравнение
@@ -200,7 +266,7 @@ def plot_compare(groups: list[list[Sample]], path: Path, *, lang="en", log_x=Tru
 
 # ---------------------------------------------------------------- всё сразу
 def plot_all(file_groups: list[tuple[Path, list[Sample]]], out: Path, *, lang="en", bin_um=None,
-             xmax=None, independent_axes=False, show_name=True, log_x=True) -> list[tuple]:
+             xmax=None, independent_axes=False, show_name=True, log_x=True, dist_log=False) -> list[tuple]:
     """PNG по каждому образцу (в подпапке с именем файла) + compare.png.
 
     Возвращает [(образец или None для compare.png, путь)].
@@ -211,13 +277,14 @@ def plot_all(file_groups: list[tuple[Path, list[Sample]]], out: Path, *, lang="e
         if not samples:
             continue
         folder = out / safe_filename(Path(file).stem)
-        shared = (None, None) if independent_axes else common_axes(samples, bin_um, xmax)
+        shared = (None, None, None) if independent_axes else common_axes(samples, bin_um, xmax, dist_log)
         used = set()
         for s in samples:
             base = safe_filename(s.label if s.name in used else s.name)
             used.add(s.name)
             made.append((s, plot_sample(s, folder / f"{base}.png", lang=lang, bin_um=bin_um,
-                                        xmax=xmax or shared[0], ymax=shared[1], show_name=show_name)))
+                                        xmax=xmax or shared[0], ymax=shared[1], show_name=show_name,
+                                        log_x=dist_log, xmin=shared[2])))
     groups = [g for _, g in file_groups if g]
     if groups:
         made.append((None, plot_compare(groups, out / "compare.png", lang=lang, log_x=log_x, xmax=xmax)))
