@@ -160,6 +160,10 @@ class DatabaseTab(tk.Frame):
         self.title = PanelTitle(right, "Партия не выбрана")
         self.title.pack(fill="x")
         self.nb = ttk.Notebook(right)
+        from .. import help_texts
+        from ..widgets import notebook_help
+
+        notebook_help(self.nb, help_texts.TABS)
         self.nb.pack(fill="both", expand=True)
 
         # карточка партии

@@ -367,3 +367,35 @@ def test_import_wizard(win, tmp_path):
     win.root.update()
     assert "Пока не получается" in w2.result_label.cget("text")
     w2.destroy()
+
+
+def _hover(widget, x, y, wait=0.9):
+    import time
+
+    widget.event_generate("<Motion>", x=x, y=y, warp=False)
+    t0 = time.time()
+    while time.time() - t0 < wait:
+        widget.update()
+        time.sleep(0.02)
+
+
+def test_section_help_on_hover(win):
+    """Подержать мышь над вкладкой / полем результата / заголовком сводки — всплывает пояснение."""
+    win.root.deiconify()
+    win.root.update()
+    nb = win.nb
+    y = 8
+    xs = [x for x in range(2, nb.winfo_width(), 4) if nb.identify(x, y) not in ("", "client")]
+    x_cmp = next(x for x in xs if nb.index(f"@{x},{y}") == 1)
+    _hover(nb, x_cmp, y)
+    tip = win.tab_help
+    assert tip.visible
+    texts = [w.cget("text") for w in tip._tip.winfo_children()[0].winfo_children()]
+    assert texts[0] == "Сравнение образцов"
+    _hover(nb, 2, nb.winfo_height() - 5)          # ушли с вкладок — окошко пропадает
+    assert not tip.visible
+
+    from psd_lab.gui.help_texts import metric
+
+    assert metric("d10, мкм")[0] == "d10" and metric("15–53 мкм, %")[0] == "Доля 15–53 мкм"
+    win.root.withdraw()

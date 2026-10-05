@@ -43,6 +43,17 @@ class SummaryTab(tk.Frame):
         frame.pack(fill="both", expand=True, padx=2, pady=2)
         self.icon = icon
         self.tree = ttk.Treeview(frame, show="tree headings", selectmode="extended")
+        from .. import help_texts
+        from ..widgets import HelpTip
+
+        def heading_help(x, y):          # справка при наведении на заголовок столбца
+            if self.tree.identify_region(x, y) != "heading":
+                return None
+            col = self.tree.identify_column(x)
+            text = self.tree.heading(col, "text")
+            got = help_texts.metric(text)
+            return (col, *got) if got else None
+        HelpTip(self.tree, heading_help)
         self.tree.heading("#0", text="QC")
         self.tree.column("#0", width=theme.icon_px() + theme.px(58), minwidth=theme.icon_px() + theme.px(12),
                          stretch=False, anchor="center")

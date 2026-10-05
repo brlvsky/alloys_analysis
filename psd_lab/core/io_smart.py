@@ -473,6 +473,22 @@ NAME_WORDS = ("name", "назв", "образец", "sample", "партия", "b
 _DATE_RE = re.compile(r"^\s*\d{1,4}[./-]\d{1,2}[./-]\d{1,4}(\s+\d{1,2}:\d{2}(:\d{2})?)?\s*$")
 
 
+_DESCRIPTOR = re.compile(
+    r"накоплен\w*|накопл\w*|остат\w*|проход\w*|прошло|на\s+сите|сито|сит\w*|доля|доли|масс\w*|объ[её]м\w*|"
+    r"cumulative|cum|passing|pass|retained|undersize|oversize|volume|vol|mass|density|frequency|freq\w*|"
+    r"channel|chan|percent|value[s]?|мельче|крупнее|q3lg|q3|q|r|σq|Σq|δq|dq|mm|мм|мкм|µm|um|%|[(),.:;/\\\-\s*]",
+    flags=re.I)
+
+
+def _generic(header: str) -> bool:
+    """Заголовок только описывает вид данных («Остаток на сите, %», «% Passing», «Q3, %»), а не называет пробу."""
+    h = header.strip().lower().replace(" ", "")
+    if h in {g.replace(" ", "") for g in GENERIC_HEADERS}:
+        return True
+    rest = _DESCRIPTOR.sub("", header)
+    return len(re.sub(r"\W", "", rest)) < 2
+
+
 def _label_left(rows, r, c) -> str:
     """Подпись строки — первый текст левее ячейки (в таблице «боком» это заголовок исходного столбца)."""
     for k in range(c - 1, -1, -1):
@@ -493,8 +509,7 @@ def _name(rows, c, r0, sheet, file: Path) -> str:
         if _has(_label_left(rows, r, c), NAME_WORDS):
             return v
     header = cands[0][1] if cands else ""
-    if header and header.strip().lower().replace(" ", "") not in {h.replace(" ", "") for h in GENERIC_HEADERS} \
-            and not _has(header, SIZE_WORDS[:6]):
+    if header and not _generic(header) and not _has(header, SIZE_WORDS[:6]):
         return header
     if sheet and sheet.strip().lower() not in GENERIC_SHEETS and sheet != Path(file).stem:
         return sheet

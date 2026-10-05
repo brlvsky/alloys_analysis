@@ -46,6 +46,89 @@ class Tooltip:
             self._tip = None
 
 
+class HelpTip:
+    """Справка при наведении: подержите мышь над вкладкой, панелью или полем — всплывает жёлтое окно
+    с заголовком и коротким пояснением. text_fn(x, y) → (ключ, заголовок, текст) | None — текст может
+    зависеть от того, над какой частью виджета мышь (вкладка, столбец таблицы)."""
+
+    def __init__(self, widget: tk.Widget, text_fn, delay=700):
+        self.widget, self.text_fn, self.delay = widget, text_fn, delay
+        self._after = None
+        self._tip = None
+        self._key = None
+        widget.bind("<Motion>", self._motion, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<ButtonPress>", self._hide, add="+")
+
+    @classmethod
+    def static(cls, widget, title, text, delay=700):
+        return cls(widget, lambda x, y: ("static", title, text), delay)
+
+    def _motion(self, e):
+        try:
+            got = self.text_fn(e.x, e.y)
+        except Exception:  # noqa: BLE001 — подсказка не должна мешать работе
+            got = None
+        key = got[0] if got else None
+        if key == self._key:
+            return
+        self._hide()
+        self._key = key
+        if got:
+            x, y = e.x_root, e.y_root
+            self._after = self.widget.after(self.delay, lambda: self._show(got[1], got[2], x, y))
+
+    def _show(self, title, text, x, y):
+        self._after = None
+        self._tip = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        box = tk.Frame(tw, background=theme.TOOLTIP_BG, highlightthickness=1, highlightbackground=theme.DARK)
+        box.pack()
+        wrap = theme.px(340)
+        tk.Label(box, text=title, background=theme.TOOLTIP_BG, font=theme.FONTS.get("bold"), anchor="w",
+                 justify="left", wraplength=wrap, padx=theme.px(6), pady=0).pack(fill="x", pady=(theme.px(4), 0))
+        tk.Label(box, text=text, background=theme.TOOLTIP_BG, font=theme.FONTS.get("ui"), anchor="w",
+                 justify="left", wraplength=wrap, padx=theme.px(6)).pack(fill="x", pady=(0, theme.px(5)))
+        tw.update_idletasks()
+        w, h = tw.winfo_reqwidth(), tw.winfo_reqheight()
+        sw, sh = tw.winfo_screenwidth(), tw.winfo_screenheight()
+        px_, py_ = x + theme.px(14), y + theme.px(18)
+        if px_ + w > sw:
+            px_ = max(0, sw - w - 4)
+        if py_ + h > sh:
+            py_ = max(0, y - h - theme.px(8))
+        tw.wm_geometry(f"+{px_}+{py_}")
+
+    def _hide(self, _e=None):
+        if self._after:
+            self.widget.after_cancel(self._after)
+            self._after = None
+        if self._tip is not None:
+            self._tip.destroy()
+            self._tip = None
+        if _e is not None:
+            self._key = None
+
+    @property
+    def visible(self) -> bool:
+        return self._tip is not None
+
+
+def notebook_help(nb: ttk.Notebook, texts: dict) -> HelpTip:
+    """Справка по вкладкам: над заголовком вкладки — её пояснение из texts (ключ — текст вкладки)."""
+    def fn(x, y):
+        if nb.identify(x, y) in ("", "client"):
+            return None
+        try:
+            i = nb.index(f"@{x},{y}")
+        except tk.TclError:
+            return None
+        name = nb.tab(i, "text").strip()
+        got = texts.get(name)
+        return (f"tab{i}", *got) if got else None
+    return HelpTip(nb, fn)
+
+
 class ToolButton(tk.Button):
     """Плоская кнопка тулбара: приподнимается при наведении, вдавливается при нажатии.
 
@@ -262,6 +345,12 @@ class ReadoutBar(tk.Frame):
                          borderwidth=2, background=theme.FIELD, foreground=theme.TEXT,
                          width=8 if lab in wide else 6, padx=theme.px(4), pady=theme.px(1))
             v.pack(fill="x")
+            from .help_texts import metric
+
+            got = metric(lab)
+            if got:                       # справка при наведении: что это за число
+                for w in (cell, *cell.winfo_children()):
+                    HelpTip.static(w, *got)
             self.cells.append(cell)
             self.values.append(v)
         self._cols = 0

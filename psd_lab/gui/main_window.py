@@ -37,12 +37,19 @@ from .tabs.placeholder import PlaceholderTab
 from .tabs.plot_panel import PlotPanel
 from .tabs.summary import SummaryTab
 from .tabs.welcome import WelcomePanel
-from .widgets import NoteBox, PanelTitle, ReadoutBar, StatusBar, Table, Toolbar, Tooltip, groupbox, scrolled, sunken
+from . import help_texts
+from .widgets import (HelpTip, NoteBox, PanelTitle, ReadoutBar, StatusBar, Table, Toolbar, Tooltip, groupbox,
+                      notebook_help, scrolled, sunken)
 
 FLAG_ICON = {"ERROR": "flag_error", "WARN": "flag_warn", "INFO": "flag_info", None: "blank"}
 TAB_ICONS = {"Распределение": "tab_dist", "Сравнение": "tab_cmp", "Сводка": "tab_sum", "Популяции": "tab_pop",
              "Технология": "tab_tech", "Поверхность": "tab_surf", "Упаковка": "tab_pack", "Кинетика": "tab_kin",
              "База данных": "tab_db", "Методика": "tab_method"}
+def _packed(w):
+    w.pack(fill="x")
+    return w
+
+
 def open_file(path: Path):
     """Открыть файл программой по умолчанию (Word, браузер, Excel)."""
     try:
@@ -276,7 +283,7 @@ class MainWindow:
 
         left = ttk.PanedWindow(pw, orient="vertical")
         top = tk.Frame(left, background=theme.FACE)
-        PanelTitle(top, "Файлы и образцы").pack(fill="x")
+        HelpTip.static(_packed(PanelTitle(top, "Файлы и образцы")), *help_texts.PANELS["Файлы и образцы"])
         tf = sunken(top)
         tf.pack(fill="both", expand=True)
         self.tree = ttk.Treeview(tf, show="tree", selectmode="browse")
@@ -292,7 +299,7 @@ class MainWindow:
         left.add(top, weight=5)
 
         mid = tk.Frame(left, background=theme.FACE)
-        PanelTitle(mid, "Свойства").pack(fill="x")
+        HelpTip.static(_packed(PanelTitle(mid, "Свойства")), *help_texts.PANELS["Свойства"])
         pf = sunken(mid)
         pf.pack(fill="both", expand=True)
         self.props = ttk.Treeview(pf, columns=("v",), show="tree", selectmode="none", height=8)
@@ -307,7 +314,7 @@ class MainWindow:
         left.add(mid, weight=3)
 
         low = tk.Frame(left, background=theme.FACE)
-        PanelTitle(low, "Замечания по качеству").pack(fill="x")
+        HelpTip.static(_packed(PanelTitle(low, "Замечания по качеству")), *help_texts.PANELS["Замечания по качеству"])
         nf, self.notes = scrolled(low, tk.Text, height=4, width=30, wrap="word", relief="flat", borderwidth=0,
                                   background=theme.FIELD, padx=theme.px(4), pady=theme.px(3), cursor="arrow",
                                   spacing1=theme.px(1), spacing3=theme.px(3))
@@ -347,6 +354,7 @@ class MainWindow:
             self.nb.add(w, text=f" {name}  ", image=theme.load_icon(self.root, TAB_ICONS[name]), compound="left",
                         underline=1 if name in tabs else -1)
         self.nb.enable_traversal()
+        self.tab_help = notebook_help(self.nb, help_texts.TABS)   # справка при наведении на вкладку
         self.nb.bind("<<NotebookTabChanged>>", lambda e: self.refresh_tab())
         pw.add(right, weight=1)
         self.refresh_dist()
@@ -438,7 +446,9 @@ class MainWindow:
         self.log_frame.pack(side="bottom", fill="x")
         head = tk.Frame(self.log_frame, background=theme.FACE)
         head.pack(fill="x")
-        tk.Label(head, text="Журнал", font=theme.FONTS["bold"]).pack(side="left", padx=theme.px(4))
+        lab = tk.Label(head, text="Журнал", font=theme.FONTS["bold"])
+        lab.pack(side="left", padx=theme.px(4))
+        HelpTip.static(lab, *help_texts.PANELS["Журнал"])
         self.log_btn = ttk.Button(head, text="Скрыть", width=-8, command=lambda: self._set_log(not self.v_log.get()))
         self.log_btn.pack(side="right", padx=theme.px(2), pady=theme.px(1))
         self.log_body, self.log_text = None, None
@@ -1543,6 +1553,15 @@ def grab(win: tk.Misc, path: Path) -> Path:
     return path
 
 
+def _demo_hover(widget, x, y, wait=0.9):
+    """Самопроверка: «подержать мышь» над виджетом, чтобы всплыла справка."""
+    widget.event_generate("<Motion>", x=x, y=y)
+    t0 = time.time()
+    while time.time() - t0 < wait:
+        widget.update()
+        time.sleep(0.02)
+
+
 def _wizard_demo(root, raw: Path):
     from .dialogs.import_wizard import ImportWizard
 
@@ -1597,6 +1616,17 @@ def run_selftest(win: MainWindow, out: Path, splash_shot: Path | None) -> int:
             root.update()
             hover_demo[name]()
             shots.append(grab(root, out / f"{i + 1:02d}h_{safe_filename(name)}_наведение.png"))
+        if name == "Распределение":   # справка при наведении: вкладка и поле d10
+            _demo_hover(win.nb, next((x for x in range(2, win.nb.winfo_width(), 4)
+                                      if win.nb.identify(x, 8) not in ("", "client")), 10), 8)
+            shots.append(grab(root, out / f"{i + 1:02d}c_справка_вкладки.png"))
+            cell = win.readouts.cells[0]
+            _demo_hover(cell, 5, 5)
+            shots.append(grab(root, out / f"{i + 1:02d}d_справка_поля.png"))
+            _demo_hover(win.nb, 2, win.nb.winfo_height() - 5, wait=0.05)
+            _demo_hover(cell, 5, 5, wait=0.05)
+            cell.event_generate("<Leave>")
+            root.update()
         if name == "Распределение":   # логарифмическая ось
             win.v_dlog.set(True)
             win.on_view_option()

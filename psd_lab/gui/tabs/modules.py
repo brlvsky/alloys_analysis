@@ -105,6 +105,10 @@ class TechTab(tk.Frame):
         self.app = app
         st = app.st
         self.nb = ttk.Notebook(self)
+        from .. import help_texts
+        from ..widgets import notebook_help
+
+        notebook_help(self.nb, help_texts.TABS)
         self.nb.pack(fill="both", expand=True)
 
         # ---------- окна СЛС / СЭЛС
