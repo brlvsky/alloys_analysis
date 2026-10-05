@@ -151,6 +151,10 @@ class MainWindow:
         m.add_command(label="Открыть файлы…", underline=0, accelerator="Ctrl+O", command=self.open_files)
         m.add_command(label="Открыть папку…", underline=9, command=self.open_folder)
         m.add_command(label="Открыть примеры", underline=10, command=self.open_examples)
+        m.add_separator()
+        m.add_command(label="Импорт таблицы вручную…", underline=0, command=self.import_manual)
+        m.add_command(label="Настроить импорт выбранного файла…", underline=2, command=self.reimport_selected)
+        m.add_command(label="Сбросить ручную настройку импорта", underline=1, command=self.forget_import_settings)
         self.m_recent = tk.Menu(m, tearoff=0)
         m.add_cascade(label="Последние файлы", underline=0, menu=self.m_recent)
         m.add_separator()
@@ -530,16 +534,22 @@ class MainWindow:
                 if twin is not None:
                     self.log(f"ПРОПУЩЕН  {f.name}: такой же файл уже открыт из {twin.path.parent}")
                     continue
+                recipe = self.st.import_recipes.get(sha)
                 try:
-                    raw = load(f)
+                    raw = load(f, recipe)
                 except Exception as e:  # noqa: BLE001
                     self.log(f"ПРОПУЩЕН  {f.name}: не удалось прочитать ({e})")
-                    continue
+                    raw = []
                 if not raw:
-                    self.log(f"ПРОПУЩЕН  {f.name}: не найдено распределений")
-                    continue
-                kind = "экспорт Fritsch" if raw[0].source == "fritsch" else "таблица"
+                    self.log(f"ПРОПУЩЕН  {f.name}: не найдено распределений автоматически")
+                    raw, recipe = self._offer_wizard(f, sha)
+                    if not raw:
+                        continue
+                kind = ("экспорт Fritsch" if raw[0].source == "fritsch" else
+                        "ручная настройка импорта" if recipe else "таблица")
                 self.log(f"ЗАГРУЖЕН  {f.name}: {len(raw)} изм. ({kind})")
+                for note in dict.fromkeys(n for x in raw for n in x.meta.get("import_notes", [])):
+                    self.log(f"          ↳ {note}")
                 self.groups.append(FileGroup(f, raw, sha1=sha))
                 self.queue_db_import(self.groups[-1])
                 self.st.add_recent(f)
@@ -551,6 +561,93 @@ class MainWindow:
         if loaded and self.current is None:
             self.select_first()
         self.update_status(f"Загружено файлов: {loaded}")
+
+    def _offer_wizard(self, f: Path, sha: str):
+        """Автомат не нашёл распределение — предложить мастер ручного импорта (только в обычном режиме)."""
+        from ..core import SUPPORTED
+
+        if not self.save_settings or f.suffix.lower() not in SUPPORTED:
+            return [], None
+        if not messagebox.askyesno(APP_NAME, f"В файле «{f.name}» не удалось автоматически найти распределение.\n\n"
+                                   "Открыть мастер импорта и показать вручную, где размеры и где проценты?",
+                                   parent=self.root):
+            return [], None
+        return self.run_import_wizard(f, sha)
+
+    def run_import_wizard(self, f: Path, sha: str | None = None, recipe: dict | None = None):
+        """Мастер импорта для файла; при успехе запоминает настройку. Возвращает (образцы, рецепт)."""
+        from ..core.metrics import check_file, check_quality
+        from .dialogs.import_wizard import ImportWizard
+
+        try:
+            w = ImportWizard(self.root, f, recipe)
+        except Exception as e:  # noqa: BLE001
+            messagebox.showerror(APP_NAME, f"Не удалось открыть файл «{f.name}»: {e}", parent=self.root)
+            return [], None
+        res = w.show()
+        if not res:
+            return [], None
+        samples, recipe = res
+        for x in samples:
+            check_quality(x)
+        check_file(samples)
+        self.st.import_recipes[sha or file_sha1(f)] = recipe
+        self.log(f"Мастер импорта: настройка для «{f.name}» сохранена — файл будет читаться так же")
+        return samples, recipe
+
+    def import_manual(self):
+        """Файл → Импорт таблицы вручную…"""
+        from ..core import SUPPORTED
+
+        p = filedialog.askopenfilename(parent=self.root, title="Импорт таблицы вручную",
+                                       initialdir=self.st.last_dir or None,
+                                       filetypes=[("Таблицы", " ".join(f"*{e}" for e in SUPPORTED)),
+                                                  ("Все файлы", "*.*")])
+        if not p:
+            return
+        f = Path(p).resolve()
+        self.st.last_dir = str(f.parent)
+        self._reimport(f)
+
+    def reimport_selected(self):
+        """Файл → Настроить импорт выбранного файла…: открыть мастер для файла, выбранного слева."""
+        g = None
+        sel = self.tree.selection()
+        if sel:
+            iid = sel[0]
+            g = self.file_items.get(iid) or self.file_items.get(self.tree.parent(iid))
+        if g is None and self.current is not None:
+            g = next((x for x in self.groups if self.current in x.shown), None)
+        if g is None:
+            messagebox.showinfo(APP_NAME, "Выберите слева файл или образец из него.", parent=self.root)
+            return
+        self._reimport(g.path)
+
+    def _reimport(self, f: Path):
+        sha = file_sha1(f)
+        samples, recipe = self.run_import_wizard(f, sha, self.st.import_recipes.get(sha))
+        if not samples:
+            return
+        self.groups = [g for g in self.groups if g.path != f and g.sha1 != sha]
+        self.groups.append(FileGroup(f, samples, sha1=sha))
+        self.log(f"ЗАГРУЖЕН  {f.name}: {len(samples)} изм. (ручная настройка импорта)")
+        for note in dict.fromkeys(n for x in samples for n in x.meta.get("import_notes", [])):
+            self.log(f"          ↳ {note}")
+        self.queue_db_import(self.groups[-1])
+        self.st.add_recent(f)
+        self._fill_recent()
+        self.rebuild()
+        self.current = None
+        self.select_first()
+
+    def forget_import_settings(self):
+        g = next((x for x in self.groups if self.current in x.shown), None) if self.current else None
+        if g is None or g.sha1 not in self.st.import_recipes:
+            messagebox.showinfo(APP_NAME, "У выбранного файла нет ручной настройки импорта.", parent=self.root)
+            return
+        del self.st.import_recipes[g.sha1]
+        self.log(f"Ручная настройка импорта для «{g.path.name}» удалена — файл читается автоматически")
+        self.reload()
 
     def rebuild(self):
         """Пересчитать усреднение и перестроить дерево и вкладки."""
@@ -749,6 +846,11 @@ class MainWindow:
             row(sec, "Файл", Path(s.file).name)
             row(sec, "Лист", s.sheet or "—")
             row(sec, "Источник", "экспорт Fritsch" if s.source == "fritsch" else "таблица")
+            inotes = m.get("import_notes") or []
+            if inotes:
+                sec2 = section("Как прочитан файл")
+                for n_ in inotes:
+                    row(sec2, "•", n_)
             if s.members:
                 row(sec, "Расхождение повт.", f"{m.get('repeat_spread_pp', 0):.2f} п.п.")
             if s.source == "fritsch":
@@ -1441,6 +1543,17 @@ def grab(win: tk.Misc, path: Path) -> Path:
     return path
 
 
+def _wizard_demo(root, raw: Path):
+    from .dialogs.import_wizard import ImportWizard
+
+    f = raw / "Расчет.xlsx"
+    if not f.exists():
+        f = next(p for p in sorted(raw.iterdir()) if p.suffix.lower() in (".xlsx", ".xls", ".csv"))
+    w = ImportWizard(root, f)
+    w.geometry(f"{theme.px(900)}x{theme.px(720)}")
+    return w
+
+
 def run_selftest(win: MainWindow, out: Path, splash_shot: Path | None) -> int:
     root = win.root
     shots = [splash_shot] if splash_shot else []
@@ -1517,7 +1630,8 @@ def run_selftest(win: MainWindow, out: Path, splash_shot: Path | None) -> int:
     dialogs = (("settings", lambda: SettingsDialog(root, win.st)), ("about", lambda: AboutDialog(root)),
                ("print_job", lambda: RecordDialog(root, win.db, "print_jobs", "Печать: новая запись", batch_id=bid)),
                ("structure", lambda: StructureWindow(win)), ("density", lambda: DensityWindow(win)),
-               ("help", lambda: win.help("Флаги")))
+               ("help", lambda: win.help("Флаги")),
+               ("import_wizard", lambda: _wizard_demo(root, raw)))
     for name, cls in dialogs:
         d = cls()
         center_on(d, root)

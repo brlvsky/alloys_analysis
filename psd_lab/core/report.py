@@ -306,11 +306,15 @@ class BatchResult:
     outputs: list = field(default_factory=list)
 
 
-def load_many(paths, average=True, log=print) -> BatchResult:
+def load_many(paths, average=True, log=print, recipes=None) -> BatchResult:
+    """recipes — {SHA-1 файла: ручная настройка импорта} (из настроек программы)."""
+    from . import file_sha1
+
     res = BatchResult()
     for f in expand_paths(paths):
         try:
-            ss = load(f)
+            rec = (recipes or {}).get(file_sha1(f)) if recipes else None
+            ss = load(f, rec)
         except Exception as e:  # noqa: BLE001 — файл пользователя может быть любым
             res.skipped.append((f, f"не удалось прочитать: {e}"))
             log(f"ПРОПУЩЕН  {f.name}: не удалось прочитать ({e})")
@@ -319,8 +323,10 @@ def load_many(paths, average=True, log=print) -> BatchResult:
             res.skipped.append((f, "не найдено распределений"))
             log(f"ПРОПУЩЕН  {f.name}: не найдено распределений")
             continue
-        src = "экспорт Fritsch" if ss[0].source == "fritsch" else "таблица"
+        src = "экспорт Fritsch" if ss[0].source == "fritsch" else ("ручная настройка" if rec else "таблица")
         log(f"ЗАГРУЖЕН  {f.name}: {len(ss)} изм. ({src})")
+        for note in dict.fromkeys(n for s in ss for n in s.meta.get("import_notes", [])):
+            log(f"          ↳ {note}")
         res.files.append(f)
         res.samples.extend(average_repeats(ss) if average else ss)
     return res
@@ -331,7 +337,8 @@ def run_batch(src, out, settings=None, log=print, db_file=None) -> BatchResult:
 
     st = settings or Settings()
     out = Path(out)
-    res = load_many([src] if isinstance(src, (str, Path)) else src, average=st.average, log=log)
+    res = load_many([src] if isinstance(src, (str, Path)) else src, average=st.average, log=log,
+                    recipes=st.import_recipes)
     if not res.samples:
         log("Нет данных для обработки.")
         return res

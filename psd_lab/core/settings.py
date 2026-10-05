@@ -82,6 +82,7 @@ class Settings:
     zoomed: bool = True              # окно развёрнуто
     reopen_session: bool = True      # открывать файлы прошлого сеанса
     session_files: list = field(default_factory=list)
+    import_recipes: dict = field(default_factory=dict)  # {SHA-1 файла: ручная настройка импорта (мастер)}
     recent_files: list = field(default_factory=list)
     last_dir: str = ""
 

@@ -336,3 +336,34 @@ def test_distribution_log_axis(win):
         win.v_dlog.set(False)
         win.on_view_option()
     assert win.dist.figure.axes[0].get_xscale() == "linear"
+
+
+def test_import_wizard(win, tmp_path):
+    """Мастер импорта: автопредложение, ручной выбор, рецепт запоминается и используется при открытии."""
+    import openpyxl
+
+    from psd_lab.gui.dialogs.import_wizard import ImportWizard
+
+    f = tmp_path / "журнал.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Мой журнал"])
+    ws.append(["d", "ед.", "проба 1"])
+    for x, q in [(1, 2), (3, 9), (5, 20), (10, 45), (20, 75), (40, 95), (80, 100)]:
+        ws.append([x, "мкм", q])
+    wb.save(f)
+    w = ImportWizard(win.root, f)
+    win.root.update()
+    assert w.cb_axis.current() == 0 and w.sp_r0.get() == "3"      # ось найдена сама
+    w.lb_data.selection_clear(0, "end")
+    w.lb_data.selection_set(2)
+    w.update_preview()
+    assert w.samples and "d50" in w.result_label.cget("text")
+    w.on_ok()
+    samples, recipe = w.result
+    assert recipe["axis"] == 0 and recipe["data"] == [2] and len(samples) == 1
+    # ошибка в настройке — понятный текст, а не падение
+    w2 = ImportWizard(win.root, f, dict(recipe, r0=0))
+    win.root.update()
+    assert "Пока не получается" in w2.result_label.cget("text")
+    w2.destroy()

@@ -6,10 +6,11 @@ from pathlib import Path
 SUPPORTED = (".xls", ".xlsx", ".xlsm", ".csv", ".txt", ".tsv", ".dat")
 
 
-def load(path) -> list:
-    """Читает файл: сначала как экспорт Fritsch, иначе как произвольную таблицу.
+def load(path, recipe: dict | None = None) -> list:
+    """Читает файл: сначала как экспорт Fritsch, иначе как произвольную таблицу (io_smart).
 
     Если в книге есть экспорт прибора, остальные листы (ручные расчёты) не читаются.
+    recipe — ручная настройка импорта из мастера: {"sheet": имя листа, ...} (см. io_smart.parse_recipe).
     """
     from .io_fritsch import load_fritsch
     from .io_table import load_table
@@ -17,14 +18,30 @@ def load(path) -> list:
 
     path = Path(path)
     samples = []
-    if path.suffix.lower() in (".xls", ".xlsx", ".xlsm"):
-        samples = load_fritsch(path)
-    if not samples:
-        samples = load_table(path)
+    if recipe:
+        samples = load_recipe(path, recipe)
+    else:
+        if path.suffix.lower() in (".xls", ".xlsx", ".xlsm"):
+            samples = load_fritsch(path)
+        if not samples:
+            samples = load_table(path)
     for s in samples:
         check_quality(s)
     check_file(samples)
     return samples
+
+
+def load_recipe(path, recipe: dict) -> list:
+    """Импорт по ручной настройке: нужный лист книги и io_smart.parse_recipe."""
+    from .io_smart import parse_recipe
+    from .io_table import read_grids
+
+    grids = read_grids(Path(path))
+    sheet = recipe.get("sheet")
+    for name, rows in grids:
+        if sheet in (None, name) or len(grids) == 1:
+            return parse_recipe(rows, recipe, name, Path(path))
+    raise ValueError(f"в файле нет листа «{sheet}»")
 
 
 def file_sha1(path) -> str:
