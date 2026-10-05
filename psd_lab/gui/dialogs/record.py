@@ -54,8 +54,10 @@ class RecordDialog(Dialog):
                         row=i, column=2, padx=(theme.px(6), 0))
             self.widgets[f.key] = w
         if table == "print_jobs":
-            tk.Label(b, text="Плотность энергии E = P / (v·h·t) считается автоматически.",
-                     foreground=theme.SHADOW).grid(row=len(self.fields), column=0, columnspan=3, sticky="w",
+            tk.Label(b, text="Плотность энергии E = P / (v·h·t) считается автоматически.\n"
+                     "Одна E не определяет качество: при той же E разные P и v дают разный\n"
+                     "результат (Bertoli et al., Materials & Design, 2017).",
+                     foreground=theme.SHADOW, justify="left").grid(row=len(self.fields), column=0, columnspan=3, sticky="w",
                                                    pady=(theme.px(6), 0))
         if table == "mech_tests" and not self.jobs:
             tk.Label(b, text="Сначала добавьте режим печати на вкладке «Печать».", foreground="#FF0000").grid(
