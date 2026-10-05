@@ -115,6 +115,74 @@ def db_path(data_dir: Path) -> Path:
     return Path(data_dir) / "psd.sqlite"
 
 
+# ==================================================================== резервные копии
+BACKUP_KEEP = 10
+
+
+def backup_dir(db_file: Path) -> Path:
+    return Path(db_file).parent / "backups"
+
+
+def backup(conn: sqlite3.Connection, dest: Path) -> Path:
+    """Копия базы через sqlite3 backup API — корректна, даже когда база открыта."""
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    out = sqlite3.connect(str(dest))
+    try:
+        conn.backup(out)
+    finally:
+        out.close()
+    return dest
+
+
+def auto_backup(conn: sqlite3.Connection, db_file: Path, keep: int = BACKUP_KEEP, now=None) -> Path | None:
+    """Раз в день при запуске: backups/psd_ГГГГ-ММ-ДД_ЧЧММСС.sqlite; хранятся последние keep копий.
+    Пустую базу не копирует."""
+    if not conn.execute("SELECT 1 FROM measurements LIMIT 1").fetchone() and \
+            not conn.execute("SELECT 1 FROM batches LIMIT 1").fetchone():
+        return None
+    now = now or dt.datetime.now()
+    folder = backup_dir(db_file)
+    if any(folder.glob(f"psd_{now:%Y-%m-%d}_*.sqlite")):
+        return None
+    dest = backup(conn, folder / f"psd_{now:%Y-%m-%d_%H%M%S}.sqlite")
+    olds = sorted(folder.glob("psd_????-??-??_??????.sqlite"))
+    for f in olds[:-keep] if keep > 0 else []:
+        try:
+            f.unlink()
+        except OSError:
+            pass
+    return dest
+
+
+def check_backup(src: Path) -> int:
+    """Проверить, что файл — база PSD-Lab; вернуть число измерений в нём. Иначе ValueError."""
+    try:
+        c = sqlite3.connect(f"file:{Path(src).as_posix()}?mode=ro", uri=True)
+        try:
+            names = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if not {"batches", "measurements", "psd_points"} <= names:
+                raise ValueError("в файле нет таблиц базы PSD-Lab")
+            return c.execute("SELECT COUNT(*) FROM measurements").fetchone()[0]
+        finally:
+            c.close()
+    except sqlite3.DatabaseError as e:
+        raise ValueError(f"это не файл базы SQLite ({e})") from e
+
+
+def restore(conn: sqlite3.Connection, src: Path) -> int:
+    """Заменить содержимое открытой базы копией src. Возвращает число измерений после восстановления."""
+    n = check_backup(src)
+    s = sqlite3.connect(str(src))
+    try:
+        s.backup(conn)
+    finally:
+        s.close()
+    conn.executescript(SCHEMA)   # таблицы, появившиеся в новых версиях программы
+    conn.commit()
+    return n
+
+
 # ==================================================================== партии
 ADDITIVES = {"si": "Si", "c": "C", "y2o3": "Y2O3"}
 

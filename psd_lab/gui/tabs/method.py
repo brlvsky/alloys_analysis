@@ -21,17 +21,71 @@ def sop_text() -> str:
     return "# Методика\n\nФайл методики не найден."
 
 
-def render_markdown(text_widget: tk.Text, md: str) -> None:
-    """Простой показ Markdown: заголовки жирным и крупнее, списки, **жирный** внутри строки."""
+def setup_text_tags(t: tk.Text) -> None:
+    """Стили для render_markdown: заголовки, жирный, списки, моноширинный код, строки таблиц."""
+    fam = theme.FONTS["ui"][0]
+    t.tag_configure("h1", font=(fam, 13, "bold"), spacing3=theme.px(6))
+    t.tag_configure("h2", font=(fam, 10, "bold"), foreground=theme.SELECT_BG, spacing1=theme.px(4))
+    t.tag_configure("h3", font=theme.FONTS["bold"], spacing1=theme.px(3))
+    t.tag_configure("b", font=theme.FONTS["bold"])
+    t.tag_configure("li", lmargin1=theme.px(12), lmargin2=theme.px(28))
+    t.tag_configure("code", font=theme.FONTS["mono"], background="#F0F0F0")
+    t.tag_configure("pre", font=theme.FONTS["mono"], background="#F0F0F0", lmargin1=theme.px(12),
+                    lmargin2=theme.px(12))
+    t.tag_configure("row", lmargin1=theme.px(12), lmargin2=theme.px(28))
+    t.tag_configure("hr", foreground=theme.SHADOW, justify="center")
+
+
+def _inline(t: tk.Text, line: str, tag=()):
+    """**жирный** и `код` внутри строки."""
+    for i, part in enumerate(re.split(r"\*\*", line)):
+        bold = ("b",) if i % 2 else ()
+        for j, piece in enumerate(part.split("`")):
+            t.insert("end", piece, tag + bold + (("code",) if j % 2 else ()))
+
+
+def render_markdown(text_widget: tk.Text, md: str) -> list[tuple[int, str, str]]:
+    """Простой показ Markdown: заголовки, списки, **жирный**, `код`, блоки кода, таблицы (строка — пункт:
+    первая ячейка жирным). Возвращает [(уровень, текст заголовка, метка в тексте)] для оглавления."""
     t = text_widget
     t.configure(state="normal")
     t.delete("1.0", "end")
+    heads = []
+    pre = False
+    in_table = False     # первая строка таблицы — заголовок, его не показываем
     for line in md.splitlines():
-        if line.startswith("# "):
-            t.insert("end", line[2:] + "\n", "h1")
+        if line.strip().startswith("```"):
+            pre = not pre
             continue
-        if line.startswith("## "):
-            t.insert("end", "\n" + line[3:] + "\n", "h2")
+        if pre:
+            t.insert("end", line + "\n", "pre")
+            continue
+        if line.lstrip().startswith("|"):
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if not in_table:
+                in_table = True
+                continue
+            if all(re.fullmatch(r":?-{2,}:?", c) for c in cells if c):
+                continue
+            first, rest = cells[0], [c for c in cells[1:] if c]
+            t.insert("end", "  ▪ ", "row")
+            _inline(t, first, ("row",) if "**" in first else ("row", "b"))
+            if rest:
+                t.insert("end", " — ", "row")
+                _inline(t, "; ".join(rest), ("row",))
+            t.insert("end", "\n", "row")
+            continue
+        in_table = False
+        m = re.match(r"^(#{1,3}) (.*)$", line)
+        if m:
+            lvl, title = len(m.group(1)), m.group(2).strip()
+            mark = f"h{len(heads)}"
+            t.mark_set(mark, "end-1c")
+            t.mark_gravity(mark, "left")
+            heads.append((lvl, title.replace("**", ""), mark))
+            t.insert("end", ("" if lvl == 1 else "\n") + title.replace("**", "") + "\n", f"h{lvl}")
+            continue
+        if line.strip() == "---":   # разделитель разделов: отступ уже даёт заголовок
             continue
         tag = ()
         m = re.match(r"^(\s*)(-|\d+\.)\s+(.*)$", line)
@@ -39,10 +93,10 @@ def render_markdown(text_widget: tk.Text, md: str) -> None:
             bullet = "•" if m.group(2) == "-" else m.group(2)
             t.insert("end", f"  {bullet} ", "li")
             line, tag = m.group(3), ("li",)
-        for i, part in enumerate(re.split(r"\*\*", line)):
-            t.insert("end", part, tag + (("b",) if i % 2 else ()))
+        _inline(t, line, tag)
         t.insert("end", "\n", tag)
     t.configure(state="disabled")
+    return heads
 
 
 class MethodTab(tk.Frame):
@@ -58,11 +112,7 @@ class MethodTab(tk.Frame):
                                     pady=theme.px(6), background=theme.FIELD, cursor="arrow",
                                     spacing1=theme.px(1), spacing3=theme.px(2))
         frame.pack(fill="both", expand=True)
-        fam = theme.FONTS["ui"][0]
-        self.text.tag_configure("h1", font=(fam, 13, "bold"), spacing3=theme.px(6))
-        self.text.tag_configure("h2", font=(fam, 10, "bold"), foreground=theme.SELECT_BG, spacing1=theme.px(4))
-        self.text.tag_configure("b", font=theme.FONTS["bold"])
-        self.text.tag_configure("li", lmargin1=theme.px(12), lmargin2=theme.px(28))
+        setup_text_tags(self.text)
         render_markdown(self.text, sop_text())
 
         right = tk.Frame(pw, background=theme.FACE)

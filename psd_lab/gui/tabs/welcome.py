@@ -15,7 +15,9 @@ TIPS = [
     "Флажки в списке слева включают и выключают образцы в сравнении, сводке и отчёте.",
     "Клавиша F2 переименовывает образец, а «Вид → Усреднять повторы» отключает усреднение.",
     "Строки сводки можно выделить и нажать Ctrl+C — они вставятся в Excel с десятичной запятой.",
-    "Кнопка «Отчёт» делает один файл report.html — его можно сразу отправить руководителю.",
+    "Кнопка «Отчёт» делает один файл report.html, а «Word» — отчёт report.docx, который можно править.",
+    "Файлы и папки можно просто перетащить на окно программы из Проводника.",
+    "«Сравнение» → «два образца» показывает разницу «до и после»: где порошок стал мельче, а где крупнее.",
     "Красный значок у образца — отрицательная обскурация: фон был записан неверно, измерение лучше повторить.",
     "Кривые никогда не растягиваются до 100 %: если кривая не доходит до 100 %, программа это покажет.",
     "Вкладка «Популяции» раскладывает распределение на группы частиц — так видно, сколько у порошка «мелочи».",
@@ -54,6 +56,8 @@ class WelcomePanel(tk.Frame):
         tk.Label(g, text="Понимает экспорт прибора Fritsch (.xls)\nи таблицы Excel / CSV / TXT:\n"
                          "столбец размеров + накопленная доля\nили доли по интервалам.",
                  justify="left").pack(anchor="w", pady=(theme.px(8), 0))
+        self.hint = tk.Label(g, text="", justify="left", foreground=theme.SELECT_BG, wraplength=theme.px(230))
+        self.hint.pack(anchor="w", pady=(theme.px(8), 0))
 
         side = tk.Frame(cols, background=theme.FACE)
         side.pack(side="left", fill="both", expand=True, anchor="n")
@@ -90,6 +94,9 @@ class WelcomePanel(tk.Frame):
         if advance:
             self._tip_i = (self._tip_i + 1) % len(TIPS)
         self.tip.configure(text=TIPS[self._tip_i])
+
+    def set_hint(self, text: str):
+        self.hint.configure(text=text)
 
     def set_recent(self, paths: list[str]):
         self.recent.delete(0, "end")

@@ -103,6 +103,36 @@ class MainWindow:
         self.update_status("Готово")
         self.log(f"{APP_NAME} {__version__} запущен. Масштаб интерфейса {theme.SCALE['total'] * 100:.0f} %. "
                  f"Папка данных: {data_dir()}")
+        self.dnd = False
+        root.after(50, self._enable_dnd)
+        if save_settings:   # обычный запуск (не тесты и не самопроверка)
+            root.after(800, self._auto_backup)
+
+    def _auto_backup(self):
+        try:
+            p = db.auto_backup(self.db, self.db_path)
+        except Exception as e:  # noqa: BLE001 — копия не должна мешать работе
+            self.log(f"Резервная копия базы не создана: {e}")
+            return
+        if p:
+            self.log(f"Резервная копия базы: {p} (хранятся последние {db.BACKUP_KEEP})")
+
+    def _enable_dnd(self):
+        """Перетаскивание файлов и папок из Проводника на окно (если расширение tkdnd доступно)."""
+        from . import dnd
+
+        targets = [self.root, self.tree, self.nb, self.welcome, self.dist.canvas.get_tk_widget(),
+                   self.cmp.canvas.get_tk_widget(), self.summary]
+        self.dnd = dnd.enable(self.root, targets, self.on_drop, on_hover=self._drop_hover, log=self.log)
+        if self.dnd:
+            self.welcome.set_hint("Можно просто перетащить файлы или папку на окно программы.")
+
+    def _drop_hover(self, over: bool):
+        self.update_status("Отпустите кнопку мыши, чтобы открыть файлы" if over else "Готово")
+
+    def on_drop(self, paths):
+        self.log("Перетащено: " + ", ".join(p.name for p in paths))
+        self.load_paths(paths)
 
     # ================================================================ построение окна
     def _build_menu(self):
@@ -179,6 +209,10 @@ class MainWindow:
         m.add_separator()
         m.add_command(label="Импортировать открытые файлы в базу", underline=0, command=self.import_all_to_db)
         m.add_command(label="Экспорт базы в Excel…", underline=0, command=self.export_db)
+        m.add_separator()
+        m.add_command(label="Создать резервную копию…", underline=0, command=self.backup_db)
+        m.add_command(label="Восстановить из резервной копии…", underline=0, command=self.restore_db)
+        m.add_command(label="Папка резервных копий", underline=0, command=self.open_backup_dir)
         mb.add_cascade(label="База", underline=0, menu=m)
 
         m = tk.Menu(mb, tearoff=0)
@@ -187,9 +221,12 @@ class MainWindow:
         mb.add_cascade(label="Сервис", underline=0, menu=m)
 
         m = tk.Menu(mb, tearoff=0)
+        m.add_command(label="Руководство пользователя", underline=0, accelerator="F1", command=self.help)
+        m.add_command(label="Что означают флаги качества", underline=4, command=lambda: self.help("Флаги"))
+        m.add_command(label="Форматы своих таблиц", underline=0, command=lambda: self.help("Свои таблицы"))
         m.add_command(label="Методика измерения", underline=0, command=lambda: self.nb.select(TABS.index("Методика")))
         m.add_separator()
-        m.add_command(label="О программе…", underline=2, accelerator="F1", command=self.about)
+        m.add_command(label="О программе…", underline=2, command=self.about)
         mb.add_cascade(label="Справка", underline=1, menu=m)
 
         r.configure(menu=mb)
@@ -217,7 +254,7 @@ class MainWindow:
         tb.button(ic("refresh"), self.reload, "Перечитать файлы (F5)", text=lab("Обновить"))
         tb.button(ic("settings"), self.open_settings, "Настройки", text=lab("Настройки"))
         tb.separator()
-        tb.button(ic("help"), self.about, "О программе (F1)", text=lab("Справка"))
+        tb.button(ic("help"), self.help, "Руководство пользователя (F1)", text=lab("Справка"))
         self.toolbar = tb
 
     def toggle_toolbar_labels(self):
@@ -405,7 +442,7 @@ class MainWindow:
         r.bind_all("<Control-o>", lambda e: self.open_files())
         r.bind_all("<Control-O>", lambda e: self.open_files())
         r.bind_all("<F5>", lambda e: self.reload())
-        r.bind_all("<F1>", lambda e: self.about())
+        r.bind_all("<F1>", lambda e: self.help())
         r.protocol("WM_DELETE_WINDOW", self.quit)
 
     # ================================================================ журнал и статус
@@ -918,6 +955,48 @@ class MainWindow:
                 return
             self.log(f"База выгружена в {p}")
 
+    def backup_db(self):
+        folder = db.backup_dir(self.db_path)
+        folder.mkdir(parents=True, exist_ok=True)
+        name = f"psd_копия_{dt.datetime.now():%Y-%m-%d_%H%M}.sqlite"
+        p = filedialog.asksaveasfilename(parent=self.root, title="Резервная копия базы", initialdir=str(folder),
+                                         initialfile=name, defaultextension=".sqlite",
+                                         filetypes=[("База PSD-Lab", "*.sqlite")])
+        if p:
+            self.wait_db()
+            db.backup(self.db, Path(p))
+            self.log(f"Резервная копия базы сохранена: {p}")
+            self.update_status("Резервная копия сохранена")
+
+    def restore_db(self):
+        p = filedialog.askopenfilename(parent=self.root, title="Восстановить базу из копии",
+                                       initialdir=str(db.backup_dir(self.db_path)),
+                                       filetypes=[("База PSD-Lab", "*.sqlite"), ("Все файлы", "*.*")])
+        if not p:
+            return
+        try:
+            n = db.check_backup(Path(p))
+        except ValueError as e:
+            messagebox.showerror(APP_NAME, f"Файл не подходит: {e}", parent=self.root)
+            return
+        if not messagebox.askyesno(APP_NAME, f"Заменить текущую базу копией «{Path(p).name}» "
+                                   f"(измерений в копии: {n})?\n\nТекущая база будет сохранена в папку "
+                                   "резервных копий, так что это действие можно отменить.", parent=self.root):
+            return
+        self.wait_db()
+        safety = db.backup(self.db, db.backup_dir(self.db_path) /
+                           f"psd_перед_восстановлением_{dt.datetime.now():%Y-%m-%d_%H%M%S}.sqlite")
+        db.restore(self.db, Path(p))
+        self.log(f"База восстановлена из {p}; прежняя база сохранена в {safety}")
+        self.mod_tabs["База данных"].refresh()
+        self.refresh_all(keep_dist=True)
+        self.update_status("База восстановлена")
+
+    def open_backup_dir(self):
+        folder = db.backup_dir(self.db_path)
+        folder.mkdir(parents=True, exist_ok=True)
+        open_file(folder)
+
     def batches_for(self, samples) -> list[dict]:
         names = list(dict.fromkeys(s.name for s in samples))
         out = []
@@ -1244,6 +1323,11 @@ class MainWindow:
     def about(self):
         AboutDialog(self.root).show()
 
+    def help(self, topic: str | None = None):
+        from .dialogs.help import HelpWindow
+
+        return HelpWindow.show(self.root, topic)
+
     def _save_settings(self):
         if self.save_settings:
             try:
@@ -1400,7 +1484,8 @@ def run_selftest(win: MainWindow, out: Path, splash_shot: Path | None) -> int:
     bid = win.db.execute("SELECT id FROM batches ORDER BY id LIMIT 1").fetchone()[0]
     dialogs = (("settings", lambda: SettingsDialog(root, win.st)), ("about", lambda: AboutDialog(root)),
                ("print_job", lambda: RecordDialog(root, win.db, "print_jobs", "Печать: новая запись", batch_id=bid)),
-               ("structure", lambda: StructureWindow(win)), ("density", lambda: DensityWindow(win)))
+               ("structure", lambda: StructureWindow(win)), ("density", lambda: DensityWindow(win)),
+               ("help", lambda: win.help("Флаги")))
     for name, cls in dialogs:
         d = cls()
         center_on(d, root)
@@ -1410,6 +1495,7 @@ def run_selftest(win: MainWindow, out: Path, splash_shot: Path | None) -> int:
         d.destroy()
     for p in shots:
         say(f"SELFTEST: скриншот {p}")
+    say(f"SELFTEST: перетаскивание файлов: {'доступно' if win.dnd else 'НЕДОСТУПНО (см. журнал)'}")
     # отчёты: в собранной программе это проверяет, что в сборку попали шаблоны Word и т. п.
     reports_ok = True
     for name, fn in (("report.html", win.export_html), ("report.docx", win.export_docx),

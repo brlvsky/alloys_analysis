@@ -322,8 +322,16 @@ class DatabaseTab(tk.Frame):
             return
         b = db.get(self.conn, "batches", self.batch_id)
         if messagebox.askyesno("Удаление партии", f"Удалить партию «{b['name']}» вместе со всеми её измерениями, "
-                               "снимками, анализами, режимами печати и испытаниями?\n\nЭто нельзя отменить.",
-                               icon="warning", parent=self):
+                               "снимками, анализами, режимами печати и испытаниями?\n\nПеред удалением база "
+                               "сохраняется в папку резервных копий: вернуть всё можно через «База → "
+                               "Восстановить из резервной копии».", icon="warning", parent=self):
+            import datetime as dt
+
+            try:
+                db.backup(self.conn, db.backup_dir(self.app.db_path) /
+                          f"psd_перед_удалением_{dt.datetime.now():%Y-%m-%d_%H%M%S}.sqlite")
+            except Exception as e:  # noqa: BLE001
+                self.app.log(f"Резервная копия перед удалением не создана: {e}")
             db.delete(self.conn, "batches", self.batch_id)
             self.batch_id = None
             self.refresh(keep=False)

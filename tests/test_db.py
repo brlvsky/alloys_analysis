@@ -108,3 +108,34 @@ def test_qc_checklist(conn):
     assert not qc.checklist({}, {"obscuration": 64})["obscuration"]
     both = qc.combine([cl, qc.checklist({"background": True}, {"obscuration": 15})])
     assert qc.label(both) == "2/5"                                     # у среднего — только общее для всех
+
+
+def test_backup_and_restore(tmp_path):
+    import datetime as dt
+
+    from psd_lab.core import db
+
+    f = tmp_path / "данные" / "psd.sqlite"
+    conn = db.connect(f)
+    assert db.auto_backup(conn, f) is None                        # пустую базу не копирует
+    db.get_or_create_batch(conn, "П/С +0,5Y2O3")
+    conn.commit()
+    day = dt.datetime(2026, 1, 1, 10, 0, 0)
+    b1 = db.auto_backup(conn, f, now=day)
+    assert b1 and b1.exists() and b1.parent.name == "backups"
+    assert db.auto_backup(conn, f, now=day.replace(hour=12)) is None   # второй раз за день — нет
+    for k in range(2, 15):                                         # хранятся последние 10
+        db.auto_backup(conn, f, now=day + dt.timedelta(days=k))
+    assert len(list(db.backup_dir(f).glob("psd_*.sqlite"))) == db.BACKUP_KEEP
+    # восстановление: удалили партию — вернули из копии
+    conn.execute("DELETE FROM batches")
+    conn.commit()
+    snap = sorted(db.backup_dir(f).glob("psd_*.sqlite"))[-1]
+    db.restore(conn, snap)
+    assert [r["name"] for r in db.batches(conn)] == ["П/С +0,5Y2O3"]
+    bad = tmp_path / "не база.sqlite"
+    bad.write_text("hello", encoding="utf-8")
+    import pytest
+
+    with pytest.raises(ValueError):
+        db.check_backup(bad)

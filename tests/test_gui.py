@@ -276,3 +276,36 @@ def test_compare_pair(win):
     win.v_cmp_mode.set("all")
     win.on_cmp_mode()
     assert win.pair_panel.winfo_manager() == ""
+
+
+def test_drag_and_drop(win, tmp_path):
+    """Перетаскивание: tkdnd подключается, пути с пробелами и кириллицей разбираются, файл открывается."""
+    import shutil
+
+    from psd_lab.gui import dnd
+
+    win.root.update()
+    assert win.dnd, "расширение tkdnd не загрузилось"
+    src = tmp_path / "папка с пробелом" / "Расчет копия.xlsx"
+    src.parent.mkdir()
+    shutil.copy2(RAW / "Расчет.xlsx", src)
+    data = "{" + str(src) + "} {" + str(tmp_path / "нет такого.csv") + "}"
+    paths = dnd.parse_paths(win.root, data)
+    assert paths[0] == src and len(paths) == 2
+    before = len(win.groups)
+    win.on_drop([src.parent])          # папка целиком
+    win.root.update()
+    assert len(win.groups) >= before   # тот же файл (SHA-1) не дублируется, новый — добавляется
+
+
+def test_help_window(win):
+    """F1: руководство из README с оглавлением; раздел разработчика не показывается."""
+    w = win.help("Флаги")
+    win.root.update()
+    titles = [w.toc.get(i).strip() for i in range(w.toc.size())]
+    assert any("Флаги качества" in t for t in titles)
+    assert not any("разработчика" in t for t in titles)
+    assert w.toc.curselection()                      # раздел «Флаги» выделен
+    assert len(w.text.image_names()) >= 3            # значки флагов в тексте
+    assert win.help() is w                           # второе окно не создаётся
+    w.destroy()

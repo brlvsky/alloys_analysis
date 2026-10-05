@@ -72,6 +72,7 @@ def run_pyinstaller():
         "--distpath", str(DIST), "--workpath", str(BUILD / "pyinstaller"), "--specpath", str(BUILD),
         "--icon", str(ROOT / "assets" / "app.ico"),
         "--add-data", f"{ROOT / 'assets'}{sep}assets",
+        "--add-data", f"{ROOT / 'README.md'}{sep}.",      # руководство для окна «Справка»
         "--hidden-import", "matplotlib.backends.backend_tkagg",
         "--hidden-import", "PIL._tkinter_finder",
         "--hidden-import", "scipy.special.cython_special",
