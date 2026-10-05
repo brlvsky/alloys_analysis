@@ -28,6 +28,7 @@ from .dialogs.structure import StructureWindow
 from .tabs.database import DatabaseTab
 from .dialogs.density import DensityWindow
 from .tabs.modules import PopulationsTab, SurfaceTab, TechTab
+from .tabs.method import MethodTab
 from .tabs.modules2 import KineticsTab, PackingTab
 from .tabs.placeholder import PlaceholderTab
 from .tabs.plot_panel import PlotPanel
@@ -268,7 +269,8 @@ class MainWindow:
                                   icon=lambda lv: theme.load_icon(self.root, FLAG_ICON[lv]))
         self.mod_tabs = {"Популяции": PopulationsTab(self.nb, self), "Технология": TechTab(self.nb, self),
                          "Поверхность": SurfaceTab(self.nb, self), "Упаковка": PackingTab(self.nb, self),
-                         "Кинетика": KineticsTab(self.nb, self), "База данных": DatabaseTab(self.nb, self)}
+                         "Кинетика": KineticsTab(self.nb, self), "База данных": DatabaseTab(self.nb, self),
+                         "Методика": MethodTab(self.nb, self)}
         tabs = {"Распределение": dist_tab, "Сравнение": self.cmp, "Сводка": self.summary, **self.mod_tabs}
         for name in TABS:
             w = tabs.get(name) or PlaceholderTab(self.nb, name)
@@ -663,7 +665,8 @@ class MainWindow:
         if not keep_dist or self.current is None:
             self.refresh_dist()
         self.refresh_cmp()
-        self.summary.show(self.enabled_samples(), self.st.windows_tuples)
+        en = self.enabled_samples()
+        self.summary.show(en, self.st.windows_tuples, qc=self.qc_labels(en))
         if self.nb.index("current") >= 3:
             self.refresh_tab()
         if self.current is not None:
@@ -732,8 +735,10 @@ class MainWindow:
                 self.log(f"БАЗА      {path.name}: уже в базе")
         if changed:
             self.update_status()
-            if TABS[self.nb.index("current")] == "База данных":
-                self.mod_tabs["База данных"].refresh()
+            en = self.enabled_samples()
+            self.summary.show(en, self.st.windows_tuples, qc=self.qc_labels(en))
+            if TABS[self.nb.index("current")] in ("База данных", "Методика"):
+                self.refresh_tab()
         if self._db_pending > 0 or (self._db_thread and self._db_thread.is_alive()):
             self.root.after(300, self._poll_db)
 
@@ -744,6 +749,40 @@ class MainWindow:
             self.root.update()
             time.sleep(0.05)
             self._poll_db()
+
+    # ================================================================ чек-лист качества (М8)
+    def sample_measurements(self, s: Sample):
+        """(sha1 файла, [(номер измерения, исходное измерение)]) для образца (в т.ч. среднего повторов)."""
+        g = next((g for g in self.groups if s in g.shown), None)
+        if g is None:
+            return None, []
+        raws = [r for r in g.raw if r.meas_id in s.members] if s.members else [s]
+        return g.sha1, [(db.meas_key(r), r) for r in raws]
+
+    def qc_for(self, s: Sample):
+        """(чек-лист, все ли измерения уже в базе, список номеров измерений)."""
+        from ..core import qc
+
+        sha, ms = self.sample_measurements(s)
+        lists, found = [], True
+        for no, r in ms:
+            saved = db.qc_get(self.db, sha, no) if sha else None
+            found = found and saved is not None
+            lists.append(qc.checklist(saved, r.meta))
+        return qc.combine(lists), found and bool(ms), [no for no, _ in ms]
+
+    def qc_save(self, s: Sample, manual: dict):
+        sha, ms = self.sample_measurements(s)
+        for no, _ in ms:
+            db.qc_set(self.db, sha, no, manual)
+        self.log(f"Чек-лист «{s.label}» сохранён")
+        en = self.enabled_samples()
+        self.summary.show(en, self.st.windows_tuples, qc=self.qc_labels(en))
+
+    def qc_labels(self, samples) -> dict:
+        from ..core import qc
+
+        return {s.label: qc.label(self.qc_for(s)[0]) for s in samples}
 
     def import_all_to_db(self):
         for g in self.groups:
@@ -910,7 +949,8 @@ class MainWindow:
         if path:
             try:
                 self.busy(True)
-                write_xlsx(self.enabled_samples(), path, self.st.windows_tuples, st=self.st)
+                en = self.enabled_samples()
+                write_xlsx(en, path, self.st.windows_tuples, st=self.st, qc=self.qc_labels(en))
             except PermissionError:
                 messagebox.showerror(APP_NAME, f"Не удалось записать {path.name}.\nВозможно, файл открыт в Excel — "
                                      "закройте его и повторите.", parent=self.root)
@@ -933,7 +973,8 @@ class MainWindow:
                        bin_um=self.st.bin_um, xmax=self.st.xmax, independent_axes=self.st.independent_axes,
                        show_name=self.st.show_name, log_x=self.st.compare_log,
                        files=[g.path for g in self.groups], st=self.st,
-                       batches=self.batches_for(self.enabled_samples()))
+                       batches=self.batches_for(self.enabled_samples()),
+                       qc=self.qc_labels(self.enabled_samples()))
         finally:
             self.root.configure(cursor="")
         self.log(f"Сохранён отчёт {path}")

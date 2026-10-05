@@ -93,3 +93,18 @@ def test_export(conn, tmp_path):
     wb = load_workbook(p)
     assert wb.sheetnames[:3] == ["Партии", "Измерения", "Метрики"]
     assert wb["Измерения"].max_row == 17
+
+
+def test_qc_checklist(conn):
+    from psd_lab.core import qc
+
+    sha = file_sha1(RAW / "N_C_.xls")
+    assert db.qc_get(conn, sha, "M4246") == {}
+    assert db.qc_get(conn, sha, "M9999") is None                      # нет такого измерения
+    assert db.qc_set(conn, sha, "M4246", {"background": True, "model": True})
+    cl = qc.checklist(db.qc_get(conn, sha, "M4246"), {"obscuration": 15})
+    assert qc.label(cl) == "3/5"                                       # фон + модель + обскурация (авто)
+    assert not qc.checklist({}, {"obscuration": -53})["obscuration"]   # отрицательная — не в окне
+    assert not qc.checklist({}, {"obscuration": 64})["obscuration"]
+    both = qc.combine([cl, qc.checklist({"background": True}, {"obscuration": 15})])
+    assert qc.label(both) == "2/5"                                     # у среднего — только общее для всех

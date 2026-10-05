@@ -23,11 +23,13 @@ SOURCE_NAMES = {"fritsch": "Fritsch", "table": "таблица"}
 
 
 # ---------------------------------------------------------------- данные сводки
-def summary_columns(windows) -> list[str]:
+def summary_columns(windows, with_qc=False) -> list[str]:
     cols = ["Образец", "Измерения", "Файл", "d10, мкм", "d50, мкм", "d90, мкм", "span",
             "D[4,3], мкм", "D[3,2], мкм"]
     cols += [f"{window_label(lo, hi)} мкм, %" for lo, hi in windows]
     cols += ["Обскурация, %", "Error", "Флаги", "Источник"]
+    if with_qc:
+        cols.append("QC")
     return cols
 
 
@@ -42,7 +44,8 @@ def flags_short(s: Sample) -> str:
     return ", ".join(f"{LEVEL_NAMES.get(lv, lv)} {counts[lv]}" for lv in order)
 
 
-def summary_rows(samples: list[Sample], windows) -> list[list]:
+def summary_rows(samples: list[Sample], windows, qc: dict | None = None) -> list[list]:
+    """qc — {подпись образца: «3/5»}; если задан, добавляется колонка QC."""
     rows = []
     for s in samples:
         m = compute(s, windows)
@@ -53,7 +56,7 @@ def summary_rows(samples: list[Sample], windows) -> list[list]:
             m["d10"], m["d50"], m["d90"], m["span"], m["d43"], m["d32"],
             *m["fractions"].values(),
             obs, err, flags_short(s), SOURCE_NAMES.get(s.source, s.source),
-        ])
+        ] + ([qc.get(s.label, "")] if qc is not None else []))
     return rows
 
 
@@ -72,7 +75,7 @@ def interval_q(s: Sample) -> np.ndarray:
 
 
 # ---------------------------------------------------------------- Excel
-def write_xlsx(samples: list[Sample], path: Path, windows, st=None) -> Path:
+def write_xlsx(samples: list[Sample], path: Path, windows, st=None, qc=None) -> Path:
     """Сводка, кривые, флаги; с настройками st — ещё листы модулей М2–М5."""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
@@ -84,9 +87,9 @@ def write_xlsx(samples: list[Sample], path: Path, windows, st=None) -> Path:
 
     ws = wb.active
     ws.title = "Сводка"
-    cols = summary_columns(windows)
+    cols = summary_columns(windows, with_qc=qc is not None)
     ws.append(cols)
-    for r in summary_rows(samples, windows):
+    for r in summary_rows(samples, windows, qc):
         ws.append([_xl(v) for v in r])
     for c in range(1, len(cols) + 1):
         cell = ws.cell(row=1, column=c)
@@ -184,16 +187,17 @@ ul.flags li{margin:3px 0}
 
 def write_html(samples: list[Sample], path: Path, *, windows, lang="en", bin_um=None, xmax=None,
                independent_axes=False, show_name=True, log_x=True, files=None, skipped=None, st=None,
-               batches=None) -> Path:
+               batches=None, qc=None) -> Path:
     files = files or sorted({s.file for s in samples})
     now = dt.datetime.now().strftime("%d.%m.%Y %H:%M")
-    cols = summary_columns(windows)
-    rows = summary_rows(samples, windows)
-    num_cols = set(range(3, len(cols) - 2))
+    cols = summary_columns(windows, with_qc=qc is not None)
+    rows = summary_rows(samples, windows, qc)
+    nw = len(windows)
+    num_cols = set(range(3, 11 + nw))
     decimals = {i: 2 for i in num_cols}
-    decimals.update({i: 1 for i in range(9, 9 + len(windows))})
-    decimals[len(cols) - 4] = 0  # обскурация
-    decimals[len(cols) - 3] = 3  # Error
+    decimals.update({i: 1 for i in range(9, 9 + nw)})
+    decimals[9 + nw] = 0   # обскурация
+    decimals[10 + nw] = 3  # Error
 
     h = [f"<!doctype html><html lang='ru'><head><meta charset='utf-8'>"
          f"<meta name='viewport' content='width=device-width,initial-scale=1'>"

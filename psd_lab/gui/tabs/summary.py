@@ -10,7 +10,7 @@ from .. import theme
 from ..widgets import PanelTitle, sunken
 
 # ширина колонок в «символах» шрифта (примерно)
-WIDE = {"Образец": 16, "Измерения": 14, "Файл": 12, "Флаги": 16, "Источник": 9}
+WIDE = {"Образец": 16, "Измерения": 14, "Файл": 12, "Флаги": 16, "Источник": 9, "QC": 5}
 
 
 def short(name: str) -> str:
@@ -43,7 +43,8 @@ class SummaryTab(tk.Frame):
         frame.pack(fill="both", expand=True, padx=2, pady=2)
         self.icon = icon
         self.tree = ttk.Treeview(frame, show="tree headings", selectmode="extended")
-        self.tree.column("#0", width=theme.icon_px() + theme.px(22), minwidth=theme.icon_px() + theme.px(12),
+        self.tree.heading("#0", text="QC")
+        self.tree.column("#0", width=theme.icon_px() + theme.px(58), minwidth=theme.icon_px() + theme.px(12),
                          stretch=False, anchor="center")
         ys = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
         xs = ttk.Scrollbar(frame, orient="horizontal", command=self.tree.xview)
@@ -62,8 +63,8 @@ class SummaryTab(tk.Frame):
         self.decimals: dict[int, int] = {}
         self._sort = (None, False)
 
-    def show(self, samples, windows):
-        self.cols = summary_columns(windows)
+    def show(self, samples, windows, qc=None):
+        self.cols = summary_columns(windows, with_qc=qc is not None)
         nfr = len(windows)
         self.decimals = {i: 2 for i in range(3, 9)}
         self.decimals.update({i: 1 for i in range(9, 9 + nfr)})
@@ -80,9 +81,9 @@ class SummaryTab(tk.Frame):
             self.tree.column(cid, width=w, minwidth=40, stretch=False,
                              anchor="w" if name in WIDE else "e")
         self.rows, self.samples = {}, {}
-        for s, r in zip(samples, summary_rows(samples, windows)):
+        for s, r in zip(samples, summary_rows(samples, windows, qc)):
             img = self.icon(s.worst_level) if self.icon else ""
-            iid = self.tree.insert("", "end", image=img,
+            iid = self.tree.insert("", "end", image=img, text=f" {qc.get(s.label, '')}" if qc else "",
                                    values=[_fmt(v, self.decimals.get(i, 2)) for i, v in enumerate(r)])
             self.rows[iid], self.samples[iid] = r, s
         if self._sort[0] is not None:

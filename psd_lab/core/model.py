@@ -25,7 +25,7 @@ class Flag(NamedTuple):
         return LEVEL_NAMES.get(self.level, self.level)
 
 
-@dataclass
+@dataclass(eq=False)   # образцы сравниваются как объекты: два повтора с одним именем — разные образцы
 class Sample:
     """Кривая распределения частиц по размерам.
 

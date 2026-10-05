@@ -166,3 +166,25 @@ def test_packing_kinetics_density(win):
     row = win.db.execute("SELECT composition, density_measured FROM batches WHERE name='П/С +0,5Y2O3'").fetchone()
     assert "Ti-43.5Al" in row[0] and row[1] == 4.15
     d.destroy()
+
+
+def test_method_tab_qc(win):
+    from psd_lab.gui.main_window import TABS
+
+    win.wait_db()
+    s = next(x for x in win.all_samples() if x.name == "П/С +0,5Y2O3")
+    sid = next(k for k, v in win.items.items() if v is s)
+    win.tree.selection_set(sid)
+    win.nb.select(TABS.index("Методика"))
+    win.root.update()
+    m = win.mod_tabs["Методика"]
+    assert "Методика измерения" in m.text.get("1.0", "3.0")
+    assert m.score.cget("text") == "QC: 1/5"                         # только автоматический пункт
+    m.vars["background"].set(True)
+    m.vars["ultrasound"].set(True)
+    m.on_change()
+    assert m.score.cget("text") == "QC: 3/5"
+    tree = win.summary.tree
+    qc_col = f"c{len(win.summary.cols) - 1}"
+    vals = {tree.set(i, "c0"): tree.set(i, qc_col) for i in tree.get_children()}
+    assert vals["П/С +0,5Y2O3"] == "3/5"

@@ -336,6 +336,22 @@ def save_composition(conn, batch_id: int, composition: dict, measured: float | N
             conn.execute("UPDATE batches SET density_measured=? WHERE id=?", (float(measured), batch_id))
 
 
+def qc_get(conn, sha1: str, meas_no: str) -> dict | None:
+    """Сохранённый чек-лист измерения или None (измерения ещё нет в базе)."""
+    row = conn.execute("SELECT qc_checklist FROM measurements WHERE file_sha1=? AND meas_no=?",
+                       (sha1, meas_no)).fetchone()
+    if row is None:
+        return None
+    return json.loads(row[0]) if row[0] else {}
+
+
+def qc_set(conn, sha1: str, meas_no: str, checklist: dict) -> bool:
+    with conn:
+        cur = conn.execute("UPDATE measurements SET qc_checklist=? WHERE file_sha1=? AND meas_no=?",
+                           (json.dumps(checklist, ensure_ascii=False), sha1, meas_no))
+    return cur.rowcount > 0
+
+
 def delete(conn, table: str, rid: int) -> None:
     with conn:
         conn.execute(f"DELETE FROM {_tbl(table)} WHERE id=?", (rid,))
