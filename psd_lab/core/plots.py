@@ -429,3 +429,4 @@ def draw_kinetics(fig, res, *, font_scale=1.0):
     _style_ax(ax2, fs)
     ax2.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8.5 * font_scale, frameon=False)
     fig.tight_layout()
+    return ax1, ax2

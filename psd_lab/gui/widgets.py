@@ -76,8 +76,14 @@ class ToolButton(tk.Button):
 
 
 class Toolbar(tk.Frame):
-    def __init__(self, parent):
+    def __init__(self, parent, grip=True):
         super().__init__(parent, background=theme.FACE, relief="raised", borderwidth=1)
+        if grip:   # «ручка» панели, как у панелей инструментов Windows 98
+            g = tk.Frame(self, background=theme.FACE)
+            g.pack(side="left", fill="y", padx=(theme.px(2), theme.px(4)), pady=theme.px(3))
+            for _ in range(2):
+                tk.Frame(g, width=max(3, theme.px(3)), relief="raised", borderwidth=1, background=theme.FACE).pack(
+                    side="left", fill="y", padx=(0, 1))
 
     def button(self, image, command, tooltip="", toggle=False, text="") -> ToolButton:
         b = ToolButton(self, image, command, tooltip, toggle, text)
@@ -103,17 +109,112 @@ class StatusBar(tk.Frame):
             lab.pack(side="left", fill="x", expand=(w == 0), padx=(theme.px(2) if i == 0 else 0, theme.px(2)),
                      pady=theme.px(2))
             self.cells.append(lab)
+        # индикатор прогресса (виден только во время долгих операций), как в Windows 95
+        self.progress = ChunkProgress(self, width=theme.px(150), height=theme.px(14))
 
     def set(self, i: int, text: str):
         self.cells[i].configure(text=text)
 
+    def show_progress(self, fraction: float | None):
+        """None — спрятать; 0…1 — показать заполнение блоками."""
+        if fraction is None:
+            self.progress.pack_forget()
+            return
+        if not self.progress.winfo_ismapped():
+            self.progress.pack(side="right", padx=theme.px(2), pady=theme.px(2), before=self.cells[-1])
+        self.progress.set(fraction)
 
-class PanelTitle(tk.Label):
-    """Тёмно-синяя полоса с белым жирным заголовком."""
+
+class PanelTitle(tk.Canvas):
+    """Заголовок панели: градиент тёмно-синий → голубой (как заголовок окна Windows 98), белый жирный текст.
+
+    Совместим с Label: configure(text=…), cget("text").
+    """
 
     def __init__(self, parent, text=""):
-        super().__init__(parent, text=text, anchor="w", background=theme.TITLE_BG, foreground=theme.TITLE_FG,
-                         font=theme.FONTS.get("bold"), padx=theme.px(5), pady=theme.px(2))
+        import tkinter.font as tkfont
+
+        f = tkfont.Font(root=parent, font=theme.FONTS.get("bold"))
+        self._h = f.metrics("linespace") + 2 * theme.px(2)
+        super().__init__(parent, height=self._h, width=theme.px(40), highlightthickness=0, borderwidth=0,
+                         background=theme.TITLE_BG)
+        self._text = text
+        self._img = None
+        self._width = 0   # не «_w»: это внутреннее имя виджета в tkinter
+        self.bind("<Configure>", self._redraw)
+
+    def configure(self, cnf=None, **kw):  # noqa: D102
+        if "text" in kw:
+            self._text = kw.pop("text")
+            self._draw_text()
+        if kw or cnf:
+            return super().configure(cnf, **kw)
+        return None
+
+    config = configure
+
+    def cget(self, key):
+        return self._text if key == "text" else super().cget(key)
+
+    def _redraw(self, e=None):
+        w = max(2, (e.width if e else self.winfo_width()))
+        if w != self._width:
+            self._width = w
+            self._img = gradient_image(self, w, self._h, theme.TITLE_BG, theme.TITLE_BG2)
+            self.delete("bg")
+            self.create_image(0, 0, image=self._img, anchor="nw", tags="bg")
+            self.tag_lower("bg")
+        self._draw_text()
+
+    def _draw_text(self):
+        self.delete("txt")
+        self.create_text(theme.px(6), self._h // 2, text=self._text, anchor="w", fill=theme.TITLE_FG,
+                         font=theme.FONTS.get("bold"), tags="txt")
+
+
+_GRAD_CACHE: dict = {}
+
+
+def gradient_image(master, w, h, c1, c2):
+    """Горизонтальный градиент (PhotoImage), кэшируется по размеру."""
+    key = (w, h, c1, c2)
+    if key not in _GRAD_CACHE:
+        import numpy as np
+        from PIL import Image, ImageTk
+
+        a = np.array([int(c1[i:i + 2], 16) for i in (1, 3, 5)], float)
+        b = np.array([int(c2[i:i + 2], 16) for i in (1, 3, 5)], float)
+        k = np.linspace(0, 1, w)[:, None]
+        row = (a + (b - a) * k).astype("uint8")[None, :, :]
+        img = Image.fromarray(np.repeat(row, h, axis=0), "RGB")
+        if len(_GRAD_CACHE) > 64:
+            _GRAD_CACHE.clear()
+        _GRAD_CACHE[key] = ImageTk.PhotoImage(img, master=master)
+    return _GRAD_CACHE[key]
+
+
+class ChunkProgress(tk.Canvas):
+    """Индикатор прогресса Windows 95: тёмно-синие блоки во вдавленной рамке."""
+
+    def __init__(self, parent, width=None, height=None):
+        super().__init__(parent, width=width or theme.px(160), height=height or theme.px(16), background=theme.FACE,
+                         relief="sunken", borderwidth=1, highlightthickness=0)
+        self.value = 0.0
+        self.bind("<Configure>", lambda e: self.set(self.value))
+
+    def set(self, fraction: float):
+        self.value = max(0.0, min(1.0, fraction))
+        self.delete("all")
+        w, h = self.winfo_width(), self.winfo_height()
+        if w < 4:
+            w, h = int(self.cget("width")), int(self.cget("height"))
+        pad, gap = 2, max(2, theme.px(2))
+        bw = max(4, int(h * 0.6))
+        n = int((w - 2 * pad + gap) // (bw + gap))
+        k = round(n * self.value)
+        for i in range(k):
+            x0 = pad + i * (bw + gap)
+            self.create_rectangle(x0, pad, x0 + bw, h - pad - 1, fill=theme.PROGRESS, outline="")
 
 
 def sunken(parent, **kw) -> tk.Frame:
@@ -191,8 +292,9 @@ class Dialog(tk.Toplevel):
 
 
 class ReadoutBar(tk.Frame):
-    """Ряд «окошек» с результатами, как на панели прибора: подпись сверху, число в белом
-    вдавленном поле. set_fields(['d10, мкм', …]) → set_values(['5,81', …])."""
+    """Ряд «окошек» с результатами, как на дисплее прибора: подпись сверху, зелёные цифры на чёрном.
+    Окошки переносятся на следующую строку, если не помещаются по ширине.
+    set_fields(['d10, мкм', …]) → set_values(['5,81', …])."""
 
     def __init__(self, parent, title="Результаты"):
         super().__init__(parent, background=theme.FACE)
@@ -200,26 +302,46 @@ class ReadoutBar(tk.Frame):
         self.box.pack(fill="x", padx=theme.px(2), pady=(0, theme.px(2)))
         self.fields: list[str] = []
         self.values: list[tk.Label] = []
+        self.cells: list[tk.Frame] = []
+        self._cols = 0
+        self.box.bind("<Configure>", lambda e: self._reflow())
 
     def set_fields(self, labels: list[str], wide=()):
         if labels == self.fields:
             return
         for w in self.box.winfo_children():
             w.destroy()
-        self.fields, self.values = list(labels), []
-        for i, lab in enumerate(labels):
-            tk.Label(self.box, text=lab, font=theme.FONTS["readout_label"], anchor="w").grid(
-                row=0, column=i, sticky="w", padx=(0, theme.px(6)))
-            v = tk.Label(self.box, text="—", font=theme.FONTS["readout"], anchor="e", relief="sunken",
-                         borderwidth=2, background=theme.FIELD, width=9 if lab in wide else 6,
-                         padx=theme.px(4), pady=theme.px(1))
-            v.grid(row=1, column=i, sticky="we", padx=(0, theme.px(6)))
+        self.fields, self.values, self.cells = list(labels), [], []
+        for lab in labels:
+            cell = tk.Frame(self.box, background=theme.FACE)
+            tk.Label(cell, text=lab, font=theme.FONTS["readout_label"], anchor="w").pack(fill="x")
+            v = tk.Label(cell, text="—", font=theme.FONTS["lcd"], anchor="e", relief="sunken",
+                         borderwidth=2, background=theme.LCD_BG, foreground=theme.LCD_FG,
+                         width=8 if lab in wide else 6, padx=theme.px(4), pady=theme.px(1))
+            v.pack(fill="x")
+            self.cells.append(cell)
             self.values.append(v)
+        self._cols = 0
+        self._reflow()
+
+    def _reflow(self):
+        if not self.cells:
+            return
+        self.box.update_idletasks()
+        avail = max(1, self.box.winfo_width() - theme.px(16))
+        cw = max(c.winfo_reqwidth() for c in self.cells) + theme.px(6)
+        cols = max(1, min(len(self.cells), avail // cw)) if avail > 1 else len(self.cells)
+        if cols == self._cols:
+            return
+        self._cols = cols
+        for i, c in enumerate(self.cells):
+            c.grid(row=i // cols, column=i % cols, sticky="we", padx=(0, theme.px(6)), pady=(0, theme.px(2)))
 
     def set_values(self, values: list[str], colors: list[str | None] | None = None):
+        """colors: None — обычный зелёный «дисплей», любой цвет — предупреждение (красные цифры)."""
         colors = colors or [None] * len(values)
         for lab, v, c in zip(self.values, values, colors):
-            lab.configure(text=v, foreground=c or theme.TEXT)
+            lab.configure(text=v, foreground=theme.LCD_WARN if c else theme.LCD_FG)
 
 
 class NoteBox(tk.Frame):

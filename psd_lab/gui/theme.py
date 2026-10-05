@@ -27,6 +27,11 @@ SELECT_BG = "#000080"   # выделение
 SELECT_FG = "#FFFFFF"
 TITLE_BG = "#000080"    # заголовок панели
 TITLE_FG = "#FFFFFF"
+TITLE_BG2 = "#1084D0"   # правый край градиента заголовка (Windows 98)
+LCD_BG = "#000000"      # «дисплей прибора» для результатов
+LCD_FG = "#00FF00"
+LCD_WARN = "#FF4040"
+PROGRESS = "#000080"    # блоки индикатора прогресса
 TOOLTIP_BG = "#FFFFE1"
 FLAG_COLORS = {"ERROR": ("#FF0000", "#FFFFFF"), "WARN": ("#FFFF00", "#000000"), "INFO": ("#0000FF", "#FFFFFF")}
 
@@ -86,7 +91,7 @@ def apply(root: tk.Tk, user_scale: float = 0) -> None:
     fam = _pick_family(fams)
     mono = next((f for f in ("Courier New", "Liberation Mono", "DejaVu Sans Mono") if f in fams), "TkFixedFont")
     FONTS.update(ui=(fam, 8), bold=(fam, 8, "bold"), mono=(mono, 9), big=(fam, 12, "bold"),
-                 readout=(fam, 10), readout_label=(fam, 8), small=(fam, 7))
+                 readout=(fam, 10), readout_label=(fam, 8), small=(fam, 7), lcd=(mono, 10, "bold"))
     for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont", "TkCaptionFont",
                  "TkSmallCaptionFont", "TkIconFont", "TkTooltipFont"):
         try:

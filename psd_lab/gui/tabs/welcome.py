@@ -10,6 +10,22 @@ from .. import theme
 from ..widgets import PanelTitle, groupbox, scrolled
 
 
+TIPS = [
+    "Наведите мышь на любой график — появится подсказка со значениями в этой точке.",
+    "Флажки в списке слева включают и выключают образцы в сравнении, сводке и отчёте.",
+    "Клавиша F2 переименовывает образец, а «Вид → Усреднять повторы» отключает усреднение.",
+    "Строки сводки можно выделить и нажать Ctrl+C — они вставятся в Excel с десятичной запятой.",
+    "Кнопка «Отчёт» делает один файл report.html — его можно сразу отправить руководителю.",
+    "Красный значок у образца — отрицательная обскурация: фон был записан неверно, измерение лучше повторить.",
+    "Кривые никогда не растягиваются до 100 %: если кривая не доходит до 100 %, программа это покажет.",
+    "Вкладка «Популяции» раскладывает распределение на группы частиц — так видно, сколько у порошка «мелочи».",
+    "«Анализ → Структура — свойства» строит график любых двух величин из базы, например d50 и прочности.",
+    "Резервная копия всех данных — это просто копия папки PSD-Lab-data рядом с программой.",
+    "Если интерфейс мелкий или крупный — «Вид → Масштаб интерфейса».",
+    "На вкладке «Методика» есть чек-лист качества: его отметки видны в сводке в колонке QC.",
+]
+
+
 class WelcomePanel(tk.Frame):
     def __init__(self, parent, on_open_files, on_open_folder, on_open_examples, on_open_recent):
         super().__init__(parent, background=theme.FACE)
@@ -39,14 +55,39 @@ class WelcomePanel(tk.Frame):
                          "столбец размеров + накопленная доля\nили доли по интервалам.",
                  justify="left").pack(anchor="w", pady=(theme.px(8), 0))
 
-        r = groupbox(cols, "Последние файлы (двойной щелчок — открыть)")
-        r.pack(side="left", fill="both", expand=True, anchor="n")
+        side = tk.Frame(cols, background=theme.FACE)
+        side.pack(side="left", fill="both", expand=True, anchor="n")
+        # «Знаете ли вы…?» — как в окне приветствия Windows 95
+        tip = groupbox(side, "Знаете ли вы…?")
+        tip.pack(fill="x", pady=(0, theme.px(10)))
+        tk.Label(tip, image=theme.load_icon(self, "bulb", 2 * theme.icon_px())).pack(side="left", anchor="n",
+                                                                                     padx=(0, theme.px(10)))
+        box = tk.Frame(tip, background=theme.FIELD, relief="sunken", borderwidth=2)
+        box.pack(side="left", fill="both", expand=True)
+        self.tip = tk.Label(box, background=theme.FIELD, justify="left", anchor="nw", wraplength=theme.px(520),
+                            padx=theme.px(8), pady=theme.px(8), height=3)
+        self.tip.pack(fill="both", expand=True)
+        ttk.Button(tip, text="Следующий совет", command=self.next_tip).pack(side="left", anchor="s",
+                                                                            padx=(theme.px(10), 0))
+        import random
+
+        self._tip_i = random.randrange(len(TIPS))
+        self.next_tip(advance=False)
+        box.bind("<Configure>", lambda e: self.tip.configure(wraplength=max(200, e.width - theme.px(20))))
+
+        r = groupbox(side, "Последние файлы (двойной щелчок — открыть)")
+        r.pack(fill="both", expand=True)
         frame, self.recent = scrolled(r, tk.Listbox, height=10, relief="flat", borderwidth=0,
                                       activestyle="none", font=theme.FONTS["ui"])
         frame.pack(fill="both", expand=True)
         self.recent.bind("<Double-Button-1>", self._open_selected)
         self.recent.bind("<Return>", self._open_selected)
         self._paths: list[str] = []
+
+    def next_tip(self, advance=True):
+        if advance:
+            self._tip_i = (self._tip_i + 1) % len(TIPS)
+        self.tip.configure(text=TIPS[self._tip_i])
 
     def set_recent(self, paths: list[str]):
         self.recent.delete(0, "end")

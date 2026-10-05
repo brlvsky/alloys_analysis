@@ -308,6 +308,124 @@ def app_icon_16():
     return img
 
 
+
+# ---------------------------------------------------------------- иконки вкладок 16×16
+def tab_dist():
+    img, d = canvas()
+    d.rectangle((0, 0, 15, 15), fill=W, outline=K)
+    for x, h in ((2, 3), (4, 7), (6, 9), (8, 6), (10, 4), (12, 2)):
+        d.rectangle((x, 14 - h, x + 1, 14), fill=D)
+    d.line([(1, 13), (4, 9), (7, 4), (10, 2), (14, 1)], fill=R)
+    return img
+
+
+def tab_cmp():
+    img, d = canvas()
+    d.rectangle((0, 0, 15, 15), fill=W, outline=K)
+    d.line([(1, 14), (4, 12), (6, 5), (9, 2), (14, 1)], fill=B)
+    d.line([(1, 14), (6, 13), (9, 8), (11, 4), (14, 2)], fill=R)
+    d.line([(1, 14), (8, 13), (11, 11), (13, 6), (14, 4)], fill=G)
+    return img
+
+
+def tab_sum():
+    img, d = canvas()
+    d.rectangle((0, 1, 15, 14), fill=W, outline=K)
+    d.rectangle((1, 2, 14, 4), fill=N)
+    for y in (7, 10):
+        d.line((1, y, 14, y), fill=D)
+    for x in (5, 10):
+        d.line((x, 5, x, 13), fill=D)
+    return img
+
+
+def tab_pop():
+    img, d = canvas()
+    import math
+    for cx, s, h, col in ((5, 1.8, 11, B), (11, 1.6, 8, R)):
+        pts = [(x, 14 - h * math.exp(-((x - cx) / s) ** 2 / 2)) for x in range(0, 16)]
+        d.line(pts, fill=col, width=1)
+    d.line((0, 15, 15, 15), fill=K)
+    return img
+
+
+def tab_tech():
+    img, d = canvas()
+    for y, col in ((10, S), (12, D), (14, K)):
+        d.rectangle((1, y, 14, y + 1), fill=col)
+    d.line((1, 10, 14, 10), fill=W)
+    d.polygon([(6, 0), (9, 0), (8, 8), (7, 8)], fill=R)
+    d.rectangle((5, 8, 10, 9), fill=Y)
+    return img
+
+
+def tab_surf():
+    img, d = canvas()
+    d.ellipse((1, 1, 14, 14), fill=S, outline=K)
+    d.ellipse((3, 3, 7, 7), fill=W)
+    for x, y in ((9, 5), (11, 9), (6, 11), (9, 12), (4, 9)):
+        d.point((x, y), fill=R)
+        d.point((x + 1, y), fill=R)
+    return img
+
+
+def tab_pack():
+    img, d = canvas()
+    for x, y in ((0, 8), (8, 8), (4, 1)):
+        d.ellipse((x, y, x + 7, y + 7), fill=S, outline=K)
+    for x, y in ((7, 6), (3, 13), (12, 13)):
+        d.ellipse((x, y, x + 2, y + 2), fill=O)
+    return img
+
+
+def tab_kin():
+    img, d = canvas()
+    d.rectangle((3, 0, 12, 1), fill=O)
+    d.rectangle((3, 14, 12, 15), fill=O)
+    d.polygon([(4, 2), (11, 2), (8, 8), (11, 13), (4, 13), (7, 8)], fill=W, outline=K)
+    d.polygon([(5, 3), (10, 3), (8, 6), (7, 6)], fill=Y)
+    d.polygon([(5, 12), (10, 12), (8, 10), (7, 10)], fill=Y)
+    return img
+
+
+def tab_db():
+    img, d = canvas()
+    d.rectangle((2, 3, 13, 13), fill=S)
+    d.line((2, 3, 2, 13), fill=K)
+    d.line((13, 3, 13, 13), fill=K)
+    for y in (8, 13):
+        d.arc((2, y - 2, 13, y + 2), 0, 180, fill=K)
+    d.ellipse((2, 1, 13, 5), fill=W, outline=K)
+    d.point((10, 10), fill=L)
+    return img
+
+
+def tab_method():
+    img, d = canvas()
+    d.polygon([(1, 2), (7, 3), (7, 15), (1, 14)], fill=W, outline=K)
+    d.polygon([(8, 3), (14, 2), (14, 14), (8, 15)], fill=W, outline=K)
+    d.rectangle((7, 3, 8, 15), fill=N)
+    for y in (6, 8, 10):
+        d.line((2, y, 6, y + 0), fill=D)
+        d.line((9, y, 13, y), fill=D)
+    return img
+
+
+def bulb32():
+    """Лампочка для «Знаете ли вы…?» (как в окне приветствия Windows 95)."""
+    img, d = canvas(32)
+    for a in range(0, 360, 45):
+        import math
+        x, y = 16 + 14 * math.cos(math.radians(a)), 12 + 11 * math.sin(math.radians(a))
+        d.line((16 + 11 * math.cos(math.radians(a)), 12 + 9 * math.sin(math.radians(a)), x, y), fill=Y, width=2)
+    d.ellipse((8, 3, 24, 20), fill=Y, outline=K)
+    d.ellipse((11, 6, 15, 10), fill=W)
+    d.polygon([(12, 18), (20, 18), (19, 23), (13, 23)], fill=Y, outline=K)
+    for y in (24, 26, 28):
+        d.rectangle((12, y, 20, y + 1), fill=D, outline=K)
+    d.line((15, 30, 17, 30), fill=K)
+    return img
+
 ICONS = {
     "open": lambda: folder(open_=True),
     "folder": folder,
@@ -334,6 +452,8 @@ ICONS = {
     "sample": sheet_chart,
     "blank": blank,
     "app": app_icon_16,
+    "tab_dist": tab_dist, "tab_cmp": tab_cmp, "tab_sum": tab_sum, "tab_pop": tab_pop, "tab_tech": tab_tech,
+    "tab_surf": tab_surf, "tab_pack": tab_pack, "tab_kin": tab_kin, "tab_db": tab_db, "tab_method": tab_method,
 }
 
 
@@ -572,11 +692,13 @@ ICONS32 = {
     "home": home32,
     "copy": copy32,
     "save": save32,
+    "bulb": bulb32,
 }
 
 
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
+    ICONS.setdefault("bulb", lambda: bulb32().resize((16, 16), Image.LANCZOS))
     for name, fn in ICONS.items():
         img16 = fn()
         img16.save(OUT / f"{name}_16.png")

@@ -8,6 +8,7 @@ from ...core import deconv, surface, windows
 from ...core.metrics import d32
 from ...core.plots import draw_populations, draw_sieve, draw_surface, draw_tech_bars
 from .. import theme
+from .. import hover
 from ..widgets import NoteBox, PanelTitle, ReadoutBar, Table, groupbox, sunken
 from .plot_panel import PlotPanel
 
@@ -24,6 +25,7 @@ def c(v, nd=1):
 
 
 def _empty(panel, text):
+    panel.set_hover(None)
     panel.figure.clear()
     ax = panel.figure.add_subplot(111)
     ax.axis("off")
@@ -78,7 +80,8 @@ class PopulationsTab(tk.Frame):
         lang = self.app.st.lang
         self._draw = lambda fig, fs=1.0: draw_populations(fig, s, res, lang=lang, font_scale=fs)
         self._name = f"популяции_{s.name}"
-        self._draw(self.plot.figure, 0.9)
+        ax = self._draw(self.plot.figure, 0.9)
+        self.plot.set_hover(hover.populations(ax, s))
         self.plot.set_title(f"Популяции частиц — {s.label}")
         self.plot.draw()
         self.pops.fill([(p.kind, c(p.weight_pct), c(p.mode_um, 2),
@@ -194,7 +197,8 @@ class TechTab(tk.Frame):
         sls, ebm = st.sls, st.ebm
         en = self.app.enabled_samples()
         self._draw_bars = lambda fig, fs=1.0: draw_tech_bars(fig, en, sls, ebm, font_scale=fs)
-        self._draw_bars(self.bars.figure, 0.9)
+        ax = self._draw_bars(self.bars.figure, 0.9)
+        self.bars.set_hover(hover.tech_bars(ax, en, sls, ebm) if en else None)
         self.bars.draw()
         s = self.app.current
         if s is None:
@@ -214,7 +218,8 @@ class TechTab(tk.Frame):
         lang = st.lang
         self._draw_sieve = lambda fig, fs=1.0: draw_sieve(fig, s, sv, lang=lang, font_scale=fs)
         self._sieve_name = f"рассев_{lo:g}-{hi:g}_{s.name}"
-        self._draw_sieve(self.sieve_plot.figure, 0.9)
+        ax = self._draw_sieve(self.sieve_plot.figure, 0.9)
+        self.sieve_plot.set_hover(hover.sieve(ax))
         self.sieve_plot.set_title(f"Кривая после рассева {lo:g}–{hi:g} мкм — модель идеального рассева — {s.label}")
         self.sieve_plot.draw()
 
@@ -294,7 +299,8 @@ class SurfaceTab(tk.Frame):
         rows = surface.shares(s, st.windows)
         self._draw = lambda fig, fs=1.0: draw_surface(fig, rows, font_scale=fs)
         self._name = f"поверхность_{s.name}"
-        self._draw(self.plot.figure, 0.9)
+        ax = self._draw(self.plot.figure, 0.9)
+        self.plot.set_hover(hover.surface_bars(ax, rows))
         self.plot.set_title(f"Доля объёма и доля поверхности по фракциям — {s.label}")
         self.plot.draw()
 

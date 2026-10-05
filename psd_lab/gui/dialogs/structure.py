@@ -6,7 +6,7 @@ from tkinter import ttk
 
 from ...core import db
 from ...core.plots import GRID_COLOR
-from .. import theme
+from .. import hover, theme
 from ..tabs.plot_panel import PlotPanel
 from ..widgets import NoteBox, Table, center_on
 
@@ -85,6 +85,8 @@ class StructureWindow(tk.Toplevel):
         pts = db.xy(self.app.db, kx, ky)
         self._draw = lambda fig, fs=1.0: draw_structure(fig, pts, lx, ly, fs)
         self._draw(self.plot.figure, 0.9)
+        ax = self.plot.figure.axes[0] if pts else None
+        self.plot.set_hover(hover.scatter_points(ax, pts, lx, ly) if ax is not None else None)
         self.plot.set_title(f"{ly}  от  {lx}")
         self.plot.draw()
         f = lambda v: f"{v:.4g}".replace(".", ",")  # noqa: E731

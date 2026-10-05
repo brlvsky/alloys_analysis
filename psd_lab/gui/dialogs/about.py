@@ -6,7 +6,7 @@ import tkinter as tk
 
 from ... import APP_NAME, PROJECT, __version__
 from .. import theme
-from ..widgets import Dialog
+from ..widgets import ChunkProgress, Dialog, gradient_image
 
 
 def library_versions() -> str:
@@ -39,28 +39,49 @@ class AboutDialog(Dialog):
 
 
 class Splash(tk.Toplevel):
-    """Серое окно с тёмно-синей полосой: «PSD-Lab для Windows, версия 1.0 / Загрузка модулей…»."""
+    """Заставка: градиентная полоса с названием, значок, «Загрузка модулей…» и блочный индикатор."""
 
     def __init__(self, root: tk.Tk):
         super().__init__(root)
         self.overrideredirect(True)
         self.configure(background=theme.FACE, relief="raised", borderwidth=2)
-        bar = tk.Frame(self, background=theme.TITLE_BG)
-        bar.pack(fill="x", padx=2, pady=2)
-        tk.Label(bar, text=APP_NAME, background=theme.TITLE_BG, foreground=theme.TITLE_FG,
-                 font=theme.FONTS["big"], padx=10, pady=6).pack(side="left")
-        body = tk.Frame(self, background=theme.FACE, padx=16, pady=12)
+        w = theme.px(420)
+        bar_h = theme.px(46)
+        self._grad = gradient_image(self, w, bar_h, theme.TITLE_BG, theme.TITLE_BG2)
+        c = tk.Canvas(self, width=w, height=bar_h, highlightthickness=0, borderwidth=0)
+        c.pack(fill="x", padx=2, pady=2)
+        c.create_image(0, 0, image=self._grad, anchor="nw")
+        c.create_text(theme.px(12), bar_h // 2, text=APP_NAME, anchor="w", fill="white", font=theme.FONTS["big"])
+        c.create_text(w - theme.px(12), bar_h // 2, text=f"версия {__version__}", anchor="e", fill="white",
+                      font=theme.FONTS["ui"])
+        body = tk.Frame(self, background=theme.FACE, padx=theme.px(16), pady=theme.px(12))
         body.pack(fill="both", expand=True)
-        tk.Label(body, image=theme.load_icon(self, "app", 32)).pack(side="left", padx=(0, 14))
+        tk.Label(body, image=theme.load_icon(self, "app", 64 if theme.SCALE["total"] >= 1.5 else 32)).pack(
+            side="left", padx=(0, theme.px(16)), anchor="n")
         right = tk.Frame(body, background=theme.FACE)
-        right.pack(side="left", fill="both")
+        right.pack(side="left", fill="both", expand=True)
         tk.Label(right, text=f"{APP_NAME} для Windows, версия {__version__}", font=theme.FONTS["bold"]).pack(anchor="w")
-        tk.Label(right, text="Анализ гранулометрии порошков").pack(anchor="w")
+        tk.Label(right, text="Анализ гранулометрии порошков\nдля аддитивного производства", justify="left").pack(
+            anchor="w")
         self.status = tk.Label(right, text="Загрузка модулей…")
-        self.status.pack(anchor="w", pady=(10, 0))
+        self.status.pack(anchor="w", pady=(theme.px(10), theme.px(4)))
+        self.bar = ChunkProgress(right, width=theme.px(260), height=theme.px(16))
+        self.bar.pack(anchor="w")
         self.update_idletasks()
-        w, h = max(380, self.winfo_reqwidth()), self.winfo_reqheight()
-        x = (self.winfo_screenwidth() - w) // 2
-        y = (self.winfo_screenheight() - h) // 3
-        self.geometry(f"{w}x{h}+{x}+{y}")
+        sw, sh = self.winfo_reqwidth(), self.winfo_reqheight()
+        x = (self.winfo_screenwidth() - sw) // 2
+        y = (self.winfo_screenheight() - sh) // 3
+        self.geometry(f"+{x}+{y}")
         self.lift()
+        self._step = 0
+        self.after(60, self._tick)
+
+    def _tick(self):
+        if not self.winfo_exists():
+            return
+        self._step += 1
+        self.bar.set(min(1.0, self._step / 14))
+        msgs = ["Загрузка модулей…", "Чтение настроек…", "Подготовка графиков…", "Открытие базы данных…"]
+        self.status.configure(text=msgs[min(len(msgs) - 1, self._step // 4)])
+        if self._step < 14:
+            self.after(60, self._tick)

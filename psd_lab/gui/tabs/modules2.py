@@ -8,6 +8,7 @@ from tkinter import messagebox, simpledialog, ttk
 from ...core import deconv, kinetics, packing
 from ...core.plots import draw_kinetics, draw_packing
 from .. import theme
+from .. import hover
 from ..widgets import NoteBox, PanelTitle, ReadoutBar, Table, groupbox
 from .modules import _empty, c
 from .plot_panel import PlotPanel
@@ -80,7 +81,8 @@ class PackingTab(tk.Frame):
             self.read.set_values(["—"] * 9)
         self._draw = lambda fig, fs=1.0: draw_packing(fig, e, font_scale=fs)
         self._name = f"упаковка_{s.name}"
-        self._draw(self.plot.figure, 0.9)
+        ax = self._draw(self.plot.figure, 0.9)
+        self.plot.set_hover(hover.packing(ax) if e.applicable else None)
         self.plot.set_title(f"Пористость слоя от доли мелкой популяции — {s.label}")
         self.plot.draw()
 
@@ -135,7 +137,8 @@ class KineticsTab(tk.Frame):
         pairs = [(s, self.time_of(s)) for s in self.samples]
         res = kinetics.analyse(pairs, self.app.st.windows_tuples)
         self._draw = lambda fig, fs=1.0: draw_kinetics(fig, res, font_scale=fs)
-        self._draw(self.plot.figure, 0.9)
+        axes = self._draw(self.plot.figure, 0.9)
+        self.plot.set_hover(hover.kinetics(axes, res) if axes else None)
         self.plot.draw()
         for nb in (self.notes, self.hint, self.old):
             nb.pack_forget()

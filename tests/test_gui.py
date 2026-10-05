@@ -188,3 +188,25 @@ def test_method_tab_qc(win):
     qc_col = f"c{len(win.summary.cols) - 1}"
     vals = {tree.set(i, "c0"): tree.set(i, qc_col) for i in tree.get_children()}
     assert vals["П/С +0,5Y2O3"] == "3/5"
+
+
+def test_hover_tooltips(win):
+    from psd_lab.core.metrics import cum_at
+    from psd_lab.gui.main_window import TABS
+
+    s = next(x for x in win.all_samples() if x.name == "П/С +0,5Y2O3")
+    sid = next(k for k, v in win.items.items() if v is s)
+    win.tree.selection_set(sid)
+    win.nb.select(TABS.index("Распределение"))
+    win.root.update()
+    info = win.dist.hover_at(win.dist.figure.axes[0], 30, 2)
+    want = f"{cum_at(s, 30):.1f}".replace(".", ",")
+    assert info is not None and info.title.startswith("Размер 30")
+    assert any(want in text for _, text in info.rows)
+    assert info.rects and info.points                     # подсвечен столбик и точка на кривой
+    win.nb.select(TABS.index("Сравнение"))
+    win.root.update()
+    info = win.cmp.hover_at(win.cmp.figure.axes[0], 20, 50)
+    assert info is not None and len(info.rows) == len(win.enabled_samples())
+    win.dist.hide_hover()
+    win.cmp.hide_hover()

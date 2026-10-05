@@ -20,7 +20,7 @@ from ..core.model import LEVEL_NAMES, LEVEL_ORDER, Sample
 from ..core.plots import common_axes, draw_compare, draw_sample, plot_all, plot_compare, plot_sample, safe_filename
 from ..core.report import write_html, write_xlsx
 from ..core.settings import Settings, app_base_dir, data_dir, resource_dir
-from . import theme
+from . import hover, theme
 from .dialogs.about import AboutDialog, Splash
 from .dialogs.settings_dialog import SettingsDialog
 from ..core import db
@@ -37,6 +37,9 @@ from .tabs.welcome import WelcomePanel
 from .widgets import PanelTitle, ReadoutBar, StatusBar, Toolbar, scrolled, sunken
 
 FLAG_ICON = {"ERROR": "flag_error", "WARN": "flag_warn", "INFO": "flag_info", None: "blank"}
+TAB_ICONS = {"Распределение": "tab_dist", "Сравнение": "tab_cmp", "Сводка": "tab_sum", "Популяции": "tab_pop",
+             "Технология": "tab_tech", "Поверхность": "tab_surf", "Упаковка": "tab_pack", "Кинетика": "tab_kin",
+             "База данных": "tab_db", "Методика": "tab_method"}
 TABS = ["Распределение", "Сравнение", "Сводка", "Популяции", "Технология", "Поверхность", "Упаковка",
         "Кинетика", "База данных", "Методика"]
 
@@ -60,6 +63,9 @@ class MainWindow:
         self._db_done: queue.Queue = queue.Queue()
         self._db_pending = 0
         self._db_thread = None
+        self._db_progress: queue.Queue = queue.Queue()
+        self._db_total = 0      # измерений в текущей пачке импорта
+        self._db_count = 0
         self.groups: list[FileGroup] = []
         self.items: dict[str, Sample] = {}          # iid дерева → образец
         self.file_items: dict[str, FileGroup] = {}  # iid файла → группа
@@ -274,7 +280,8 @@ class MainWindow:
         tabs = {"Распределение": dist_tab, "Сравнение": self.cmp, "Сводка": self.summary, **self.mod_tabs}
         for name in TABS:
             w = tabs.get(name) or PlaceholderTab(self.nb, name)
-            self.nb.add(w, text=name, underline=0 if name in tabs else -1)
+            self.nb.add(w, text=f" {name}  ", image=theme.load_icon(self.root, TAB_ICONS[name]), compound="left",
+                        underline=1 if name in tabs else -1)
         self.nb.enable_traversal()
         self.nb.bind("<<NotebookTabChanged>>", lambda e: self.refresh_tab())
         pw.add(right, weight=1)
@@ -645,6 +652,7 @@ class MainWindow:
 
     # ================================================================ вкладки
     def _empty_cmp(self, text="Нет выбранных образцов: отметьте их флажками слева"):
+        self.cmp.set_hover(None)
         self.cmp.figure.clear()
         ax = self.cmp.figure.add_subplot(111)
         ax.axis("off")
@@ -695,6 +703,7 @@ class MainWindow:
         import copy
 
         self._db_pending += 1
+        self._db_total += len(g.raw)
         # копии: переименование в окне во время импорта не должно попадать в базу наполовину
         self._db_jobs.put((g.path, copy.deepcopy(g.raw), g.sha1, copy.deepcopy(self.st)))
         if self._db_thread is None or not self._db_thread.is_alive():
@@ -712,13 +721,25 @@ class MainWindow:
                 break
             path, raw, sha, st = job
             try:
-                n = db.import_samples(conn, raw, sha, st)
+                n = 0
+                with conn:
+                    for s in raw:
+                        if db.import_sample(conn, s, sha, st) is not None:
+                            n += 1
+                        self._db_progress.put(1)
                 self._db_done.put((path, n, None))
             except Exception as e:  # noqa: BLE001
                 self._db_done.put((path, 0, e))
         conn.close()
 
     def _poll_db(self):
+        while True:
+            try:
+                self._db_count += self._db_progress.get_nowait()
+            except queue.Empty:
+                break
+        if self._db_total:
+            self.status.show_progress(self._db_count / self._db_total)
         changed = False
         while True:
             try:
@@ -739,8 +760,11 @@ class MainWindow:
             self.summary.show(en, self.st.windows_tuples, qc=self.qc_labels(en))
             if TABS[self.nb.index("current")] in ("База данных", "Методика"):
                 self.refresh_tab()
+        if self._db_pending <= 0:
+            self._db_total = self._db_count = 0
+            self.status.show_progress(None)
         if self._db_pending > 0 or (self._db_thread and self._db_thread.is_alive()):
-            self.root.after(300, self._poll_db)
+            self.root.after(150, self._poll_db)
 
     def wait_db(self, timeout=300.0):
         """Дождаться окончания фонового импорта (для самопроверки и тестов)."""
@@ -833,6 +857,7 @@ class MainWindow:
         if s is None:
             self._show_welcome(not self.groups)
             if self.groups:
+                self.dist.set_hover(None)
                 self.dist.figure.clear()
                 self.dist.set_title("Распределение — выберите образец слева")
                 self.dist.draw()
@@ -841,8 +866,11 @@ class MainWindow:
         self._show_welcome(False)
         grp = next((g.shown for g in self.groups if s in g.shown), [s])
         xm, ym = (None, None) if self.st.independent_axes else common_axes(grp, self.st.bin_um, self.st.xmax)
-        draw_sample(self.dist.figure, s, lang=self.st.lang, bin_um=self.st.bin_um, xmax=self.st.xmax or xm,
-                    ymax=ym, show_name=self.st.show_name, font_scale=0.9)
+        ax, ax2 = draw_sample(self.dist.figure, s, lang=self.st.lang, bin_um=self.st.bin_um,
+                              xmax=self.st.xmax or xm, ymax=ym, show_name=self.st.show_name, font_scale=0.9)
+        from ..core.plots import grid_step
+
+        self.dist.set_hover(hover.distribution(s, ax, ax2, self.st.bin_um or grid_step(s)))
         self.dist.set_title(f"Распределение — {s.label}")
         self.dist.draw()
         self.update_readouts(s)
@@ -870,8 +898,9 @@ class MainWindow:
             self._empty_cmp("Откройте файлы: Файл → Открыть файлы… (Ctrl+O)" if not self.groups else
                             "Нет выбранных образцов: отметьте их флажками слева")
             return
-        draw_compare(self.cmp.figure, groups, lang=self.st.lang, log_x=self.st.compare_log,
-                     xmax=self.st.xmax, font_scale=0.9)
+        ax = draw_compare(self.cmp.figure, groups, lang=self.st.lang, log_x=self.st.compare_log,
+                          xmax=self.st.xmax, font_scale=0.9)
+        self.cmp.set_hover(hover.compare(ax))
         n = sum(len(g) for g in groups)
         self.cmp.set_title(f"Сравнение накопленных кривых — образцов: {n}")
         self.cmp.draw()
@@ -1190,9 +1219,17 @@ def run_selftest(win: MainWindow, out: Path, splash_shot: Path | None) -> int:
             win.tree.see(sid)
             break
     root.update()
+    hover_demo = {"Распределение": lambda: win.dist.hover_at(win.dist.figure.axes[0], 30, 2),
+                  "Сравнение": lambda: win.cmp.hover_at(win.cmp.figure.axes[0], 20, 50),
+                  "Популяции": lambda: win.mod_tabs["Популяции"].plot.hover_at(
+                      win.mod_tabs["Популяции"].plot.figure.axes[0], 10, 20)}
     for i, name in enumerate(TABS):
         win.nb.select(i)
         shots.append(grab(root, out / f"{i + 1:02d}_{safe_filename(name)}.png"))
+        if name in hover_demo:   # подсказка при наведении
+            root.update()
+            hover_demo[name]()
+            shots.append(grab(root, out / f"{i + 1:02d}h_{safe_filename(name)}_наведение.png"))
         inner = getattr(win.mod_tabs.get(name), "nb", None)
         if inner is not None:   # вложенные вкладки модуля
             for j in range(1, len(inner.tabs())):
