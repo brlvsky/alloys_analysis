@@ -327,6 +327,15 @@ def update(conn, table: str, rid: int, values: dict) -> None:
         conn.execute(f"UPDATE {_tbl(table)} SET {', '.join(f'{k}=?' for k in v)} WHERE id=?", [*v.values(), rid])
 
 
+def save_composition(conn, batch_id: int, composition: dict, measured: float | None = None) -> None:
+    """Состав из калькулятора плотности (М7) — в карточку партии; измеренная плотность — если задана."""
+    with conn:
+        conn.execute("UPDATE batches SET composition=? WHERE id=?",
+                     (json.dumps(composition, ensure_ascii=False), batch_id))
+        if measured:
+            conn.execute("UPDATE batches SET density_measured=? WHERE id=?", (float(measured), batch_id))
+
+
 def delete(conn, table: str, rid: int) -> None:
     with conn:
         conn.execute(f"DELETE FROM {_tbl(table)} WHERE id=?", (rid,))

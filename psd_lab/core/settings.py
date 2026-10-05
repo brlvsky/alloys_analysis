@@ -67,6 +67,8 @@ class Settings:
     sls_index: int = 0               # выбранное окно СЛС для полос
     ebm_index: int = 0
     sieve_window: list = field(default_factory=lambda: [15, 53])                         # М4
+    packing_phi0: float = 0.60       # М6: плотность случайной упаковки монофракции
+    kinetics_times: dict = field(default_factory=dict)   # М9: {подпись образца: часы}
     requirements: dict = field(default_factory=lambda: {"d10_min": 15.0, "d50_min": 25.0,
                                                          "d50_max": 35.0, "d90_max": 53.0})
     splash: bool = True              # заставка при запуске

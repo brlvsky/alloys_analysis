@@ -134,3 +134,35 @@ def test_database_tab_and_structure(win):
     w.redraw()
     assert len(w.table.tree.get_children()) == 1      # одна партия с химанализом
     w.destroy()
+
+
+def test_packing_kinetics_density(win):
+    from psd_lab.gui.dialogs.density import DensityWindow
+    from psd_lab.gui.main_window import TABS
+
+    s = next(x for x in win.all_samples() if x.name == "П/С +0,5Y2O3")
+    sid = next(k for k, v in win.items.items() if v is s)
+    win.tree.selection_set(sid)
+    win.nb.select(TABS.index("Упаковка"))
+    win.root.update()
+    assert win.mod_tabs["Упаковка"].read.values[3].cget("text") == "52,6"   # доля мелкой популяции
+    win.nb.select(TABS.index("Кинетика"))
+    win.root.update()
+    k = win.mod_tabs["Кинетика"]
+    assert "агломерация" in k.hint.label.cget("text")
+    d = DensityWindow(win)
+    win.root.update()
+    d.measured.insert(0, "4,15")
+    d.calc()
+    assert d.res.rho == 4.15 and not d.res.in_target              # измеренная 4,15 → −6,3 % — вне цели
+    d.batch.set("П/С +0,5Y2O3")
+    import tkinter.messagebox as mb
+
+    orig, mb.showinfo = mb.showinfo, lambda *a, **k: None
+    try:
+        d.save()
+    finally:
+        mb.showinfo = orig
+    row = win.db.execute("SELECT composition, density_measured FROM batches WHERE name='П/С +0,5Y2O3'").fetchone()
+    assert "Ti-43.5Al" in row[0] and row[1] == 4.15
+    d.destroy()

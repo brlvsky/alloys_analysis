@@ -357,3 +357,75 @@ def draw_surface(fig, rows, *, font_scale=1.0):
     ax.legend(loc="upper right", fontsize=9 * font_scale, frameon=True, edgecolor="black", fancybox=False)
     fig.tight_layout()
     return ax
+
+
+def draw_packing(fig, est, *, font_scale=1.0):
+    """Пористость слоя от доли мелкой фракции при отношении размеров образца и в пределе r → 0."""
+    import numpy as np
+
+    from .packing import packing_fraction
+
+    fs = 12 * font_scale
+    fig.clear()
+    ax = fig.add_subplot(111)
+    if not est.applicable:
+        ax.axis("off")
+        ax.text(0.5, 0.5, "Оценка неприменима: " + est.reason, ha="center", va="center", color="#808080",
+                wrap=True)
+        return ax
+    x = np.linspace(0, 1, 401)
+    eps = 100 * (1 - packing_fraction(x, est.r, est.phi0))
+    eps0 = 100 * (1 - packing_fraction(x, 1e-9, est.phi0))
+    ax.plot(100 * x, eps0, color="#808080", linestyle="--", linewidth=1.2, label="предел r → 0 (Фёрнас)")
+    ax.plot(100 * x, eps, color="#2a78d6", linewidth=2,
+            label=f"r = d_мелк/d_крупн = {est.r:.3f}".replace(".", ","))
+    ax.plot(100 * est.x_fine, 100 * (1 - est.phi), "o", color="#e34948", markeredgecolor="black", markersize=9,
+            label=f"образец: {100 * est.x_fine:.0f} % мелкой, ε = {100 * (1 - est.phi):.1f} %".replace(".", ","))
+    ax.plot(100 * est.x_opt, 100 * (1 - est.phi_opt), "^", color="#1baf7a", markeredgecolor="black", markersize=10,
+            label=f"оптимум: {100 * est.x_opt:.0f} % мелкой, ε = {100 * (1 - est.phi_opt):.1f} %".replace(".", ","))
+    ax.set_xlim(0, 100)
+    ax.set_ylim(0, 100 * (1 - est.phi0) * 1.15)
+    ax.set_xlabel("доля мелкой популяции (по объёму), %", fontstyle="italic", fontsize=fs)
+    ax.set_ylabel("пористость слоя ε, %", fontstyle="italic", fontsize=fs)
+    _style_ax(ax, fs)
+    ax.legend(loc="lower right", fontsize=9 * font_scale, frameon=True, edgecolor="black", fancybox=False)
+    fig.tight_layout()
+    return ax
+
+
+def draw_kinetics(fig, res, *, font_scale=1.0):
+    """d10/d50/d90 от времени (сверху) и доли по окнам (снизу) — две оси, не двойная шкала."""
+    import numpy as np
+
+    from .kinetics import exp_model
+
+    fs = 12 * font_scale
+    fig.clear()
+    if not res.times:
+        ax = fig.add_subplot(111)
+        ax.axis("off")
+        ax.text(0.5, 0.5, "Назначьте образцам время обработки (слева)", ha="center", va="center", color="#808080")
+        return
+    ax1 = fig.add_subplot(211)
+    ax2 = fig.add_subplot(212, sharex=ax1)
+    t = np.array(res.times, float)
+    colors = {"d10": "#2a78d6", "d50": "#eb6834", "d90": "#1baf7a"}
+    for k, col in colors.items():
+        ax1.plot(t, res.d[k], "o-", color=col, linewidth=1.4, markersize=7, markeredgecolor="black", label=k)
+        f = res.fits.get(k)
+        if f and f.ok:
+            tt = np.linspace(t.min(), t.max(), 200)
+            ax1.plot(tt, exp_model(tt, *f.params), "--", color=col, linewidth=1)
+    for name, ti, y in zip(res.names, t, res.d["d50"]):
+        ax1.annotate(name, (ti, y), textcoords="offset points", xytext=(5, 6), fontsize=8.5 * font_scale)
+    ax1.set_ylabel("размер, мкм", fontstyle="italic", fontsize=fs)
+    _style_ax(ax1, fs)
+    ax1.legend(loc="best", fontsize=9 * font_scale, frameon=True, edgecolor="black", fancybox=False)
+    for i, k in enumerate([k for k in res.d if k.startswith("frac:")]):
+        ax2.plot(t, res.d[k], "s-", color=SERIES_COLORS[i % len(SERIES_COLORS)], linewidth=1.2, markersize=5,
+                 label=k.split(":", 1)[1] + " мкм")
+    ax2.set_ylabel("доля, %", fontstyle="italic", fontsize=fs)
+    ax2.set_xlabel("время обработки, ч", fontstyle="italic", fontsize=fs)
+    _style_ax(ax2, fs)
+    ax2.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8.5 * font_scale, frameon=False)
+    fig.tight_layout()

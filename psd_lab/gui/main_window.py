@@ -26,7 +26,9 @@ from .dialogs.settings_dialog import SettingsDialog
 from ..core import db
 from .dialogs.structure import StructureWindow
 from .tabs.database import DatabaseTab
+from .dialogs.density import DensityWindow
 from .tabs.modules import PopulationsTab, SurfaceTab, TechTab
+from .tabs.modules2 import KineticsTab, PackingTab
 from .tabs.placeholder import PlaceholderTab
 from .tabs.plot_panel import PlotPanel
 from .tabs.summary import SummaryTab
@@ -159,7 +161,7 @@ class MainWindow:
 
         m = tk.Menu(mb, tearoff=0)
         m.add_command(label="Настройки…", underline=0, command=self.open_settings)
-        m.add_command(label="Плотность состава…", underline=0, state="disabled")
+        m.add_command(label="Плотность состава…", underline=0, command=self.open_density)
         mb.add_cascade(label="Сервис", underline=0, menu=m)
 
         m = tk.Menu(mb, tearoff=0)
@@ -265,7 +267,8 @@ class MainWindow:
         self.summary = SummaryTab(self.nb, on_select=self.on_summary_select,
                                   icon=lambda lv: theme.load_icon(self.root, FLAG_ICON[lv]))
         self.mod_tabs = {"Популяции": PopulationsTab(self.nb, self), "Технология": TechTab(self.nb, self),
-                         "Поверхность": SurfaceTab(self.nb, self), "База данных": DatabaseTab(self.nb, self)}
+                         "Поверхность": SurfaceTab(self.nb, self), "Упаковка": PackingTab(self.nb, self),
+                         "Кинетика": KineticsTab(self.nb, self), "База данных": DatabaseTab(self.nb, self)}
         tabs = {"Распределение": dist_tab, "Сравнение": self.cmp, "Сводка": self.summary, **self.mod_tabs}
         for name in TABS:
             w = tabs.get(name) or PlaceholderTab(self.nb, name)
@@ -749,6 +752,9 @@ class MainWindow:
     def open_structure(self):
         StructureWindow(self)
 
+    def open_density(self):
+        DensityWindow(self)
+
     def export_db(self):
         p = self._ask_save("Экспорт базы в Excel", "База PSD-Lab.xlsx", ".xlsx", [("Excel", "*.xlsx")])
         if p:
@@ -1159,7 +1165,7 @@ def run_selftest(win: MainWindow, out: Path, splash_shot: Path | None) -> int:
     bid = win.db.execute("SELECT id FROM batches ORDER BY id LIMIT 1").fetchone()[0]
     dialogs = (("settings", lambda: SettingsDialog(root, win.st)), ("about", lambda: AboutDialog(root)),
                ("print_job", lambda: RecordDialog(root, win.db, "print_jobs", "Печать: новая запись", batch_id=bid)),
-               ("structure", lambda: StructureWindow(win)))
+               ("structure", lambda: StructureWindow(win)), ("density", lambda: DensityWindow(win)))
     for name, cls in dialogs:
         d = cls()
         center_on(d, root)

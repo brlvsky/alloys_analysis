@@ -266,7 +266,8 @@ def write_html(samples: list[Sample], path: Path, *, windows, lang="en", bin_um=
     if batches:
         from .report_modules import batches_section
 
-        h += batches_section(batches, 9 if st is not None else 5)
+        nxt = next((int(x[len("<!--next:"):-3]) for x in reversed(h) if x.startswith("<!--next:")), 5)
+        h += batches_section(batches, nxt)
 
     if skipped:
         h.append("<h2>Пропущенные файлы</h2><ul>")

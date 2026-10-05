@@ -165,7 +165,7 @@ class DatabaseTab(tk.Frame):
         # карточка партии
         card = tk.Frame(self.nb, background=theme.FACE)
         self.nb.add(card, text="Карточка")
-        self.card = Table(card, [("Значение", 60, "w")], height=9, tree_col=("Поле", 26))
+        self.card = Table(card, [("Значение", 60, "w")], height=10, tree_col=("Поле", 26))
         self.card.pack(fill="x", padx=theme.px(2), pady=theme.px(4))
         cbar = tk.Frame(card, background=theme.FACE)
         cbar.pack(fill="x")
@@ -248,8 +248,15 @@ class DatabaseTab(tk.Frame):
         b = db.get(self.conn, "batches", self.batch_id) if self.batch_id else None
         self.title.configure(text=f"Партия: {b['name']}" if b else "Партия не выбрана")
         g = lambda v: f"{v:g}".replace(".", ",") if isinstance(v, float) else ("" if v is None else str(v))  # noqa: E731
-        self.card.fill([(g(b[f.key]) if b else "",) for f in db.FIELDS["batches"]],
-                       texts=[f.label for f in db.FIELDS["batches"]])
+        comp = ""
+        if b and b["composition"]:
+            cj = json.loads(b["composition"])
+            adds = ", ".join(f"{k} {v:g} мас.%" for k, v in cj.get("additives_wt_pct", {}).items())
+            comp = (f"{cj.get('formula', '')} ({'ат.%' if cj.get('basis') == 'at' else 'мас.%'})"
+                    + (f" + {adds}" if adds else "")
+                    + f"; ρ по правилу смесей {cj.get('rho_rule_of_mixtures', 0):.3f} г/см³".replace(".", ","))
+        self.card.fill([(g(b[f.key]) if b else "",) for f in db.FIELDS["batches"]] + [(comp,)],
+                       texts=[f.label for f in db.FIELDS["batches"]] + ["Состав (калькулятор плотности)"])
         notes = (b["notes"] or "") if b else ""
         if "уточнить" in notes:
             self.todo.set(notes.split("уточнить:", 1)[-1].strip() if notes.startswith("уточнить:") else notes)

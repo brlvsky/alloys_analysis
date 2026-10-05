@@ -101,7 +101,57 @@ def html_sections(samples, st, fig, fig_b64, start=5) -> list[str]:
                                 for s in samples) + "</ul>")
     out.append(_note("Формула:", "SSA [м²/г] = 6 / (ρ [г/см³] · D[3,2] [мкм]) — нижняя оценка для сферических частиц."))
     out.append(_note("Допущения:", surface.ASSUMPTIONS.split(": ", 1)[1]))
+    n += 1
+
+    # ---------- М6
+    from . import kinetics, packing
+    from .plots import draw_kinetics
+
+    out.append(f"<h2>{n}. Оценка плотности упаковки слоя (двухмодальные порошки)</h2>")
+    rows = []
+    for s in samples:
+        e = packing.estimate(deconv.fit(s), st.packing_phi0)
+        if e.applicable:
+            rows.append([s.label, _c(e.d_fine, 1), _c(e.d_coarse, 1), _c(e.r, 3), _c(100 * e.x_fine), _c(e.phi, 3),
+                         _c(100 * e.x_opt), _c(e.phi_opt, 3)])
+    if rows:
+        out.append(_table(["Образец", "d мелк., мкм", "d крупн., мкм", "r", "Мелкой, %", "φ образца",
+                           "Мелкой в оптимуме, %", "φ в оптимуме"], rows))
+    else:
+        out.append("<p>Двухмодальных образцов нет — модель бинарной смеси неприменима.</p>")
+    out.append(f"<p class='note'><b>Допущения: {html.escape(packing.ASSUMPTIONS)}</b></p>")
+    out.append(_note("Модель:", packing.SOURCE + f" φ₀ = {_c(st.packing_phi0, 2)}."))
+    n += 1
+
+    # ---------- М9
+    pairs = [(s, _time(s, st)) for s in samples]
+    pairs = [(s, t) for s, t in pairs if t is not None]
+    if pairs:
+        res = kinetics.analyse(pairs, st.windows_tuples)
+        out.append(f"<h2>{n}. Кинетика помола</h2>")
+        draw_kinetics(fig, res)
+        out.append(f"<img alt='Кинетика' src='data:image/png;base64,{fig_b64(fig)}'>")
+        out.append(_table(["Образец", "Время, ч", "d10, мкм", "d50, мкм", "d90, мкм"],
+                          [[nm, _c(t, 1), _c(a, 2), _c(b, 2), _c(c2, 2)] for nm, t, a, b, c2 in
+                           zip(res.names, res.times, res.d["d10"], res.d["d50"], res.d["d90"])]))
+        for w in res.warnings:
+            out.append(_note("Внимание:", w + "."))
+        for h in res.hints:
+            out.append(_note("Подсказка:", h))
+        if any(str(s.file).replace("\\", "/").split("/")[-1].lower().startswith("расчет") for s, _ in pairs):
+            out.append(_note("Пометка:", kinetics.OLD_DATA_NOTE))
+        n += 1
+    out.append(f"<!--next:{n}-->")
     return out
+
+
+def _time(s, st):
+    from .kinetics import time_from_name
+
+    v = st.kinetics_times.get(s.label)
+    if v == "":
+        return None
+    return v if v is not None else time_from_name(s.name)
 
 
 # ==================================================================== Excel
@@ -166,6 +216,33 @@ def xlsx_sheets(wb, samples, st, head_font, head_fill) -> None:
     ws = sheet("Поверхность", head, rows, [26, 11, 10] + [13] * (len(head) - 3))
     ws.append([])
     ws.append([f"ρ = {rho:g} г/см³. " + surface.ASSUMPTIONS])
+
+    from . import kinetics, packing
+
+    rows = []
+    for s in samples:
+        e = packing.estimate(deconv.fit(s), st.packing_phi0)
+        if e.applicable:
+            rows.append([s.label, round(e.d_fine, 3), round(e.d_coarse, 3), round(e.r, 4), round(100 * e.x_fine, 2),
+                         round(e.phi, 4), round(100 * e.x_opt, 2), round(e.phi_opt, 4)])
+    ws = sheet("Упаковка", ["Образец", "d мелк., мкм", "d крупн., мкм", "r", "Мелкой, %", "φ образца",
+                            "Мелкой в оптимуме, %", "φ опт."], rows, [26, 12, 12, 8, 10, 10, 18, 9])
+    ws.append([])
+    ws.append([f"φ₀ = {st.packing_phi0:g}. Допущения: {packing.ASSUMPTIONS}"])
+    ws.append([f"Модель: {packing.SOURCE}"])
+
+    pairs = [(s, _time(s, st)) for s in samples]
+    pairs = [(s, t) for s, t in pairs if t is not None]
+    if pairs:
+        res = kinetics.analyse(pairs, st.windows_tuples)
+        fr = [k for k in res.d if k.startswith("frac:")]
+        ws = sheet("Кинетика", ["Образец", "Время, ч", "d10, мкм", "d50, мкм", "d90, мкм"]
+                   + [k.split(":", 1)[1] + " мкм, %" for k in fr],
+                   [[nm, t, *(round(res.d[k][i], 3) for k in ("d10", "d50", "d90")), *(round(res.d[k][i], 2) for k in fr)]
+                    for i, (nm, t) in enumerate(zip(res.names, res.times))], [26, 9, 10, 10, 10] + [12] * len(fr))
+        ws.append([])
+        for line in res.warnings + res.hints:
+            ws.append([line])
 
 
 def batches_section(batches: list[dict], n: int) -> list[str]:

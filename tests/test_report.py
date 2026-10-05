@@ -19,12 +19,13 @@ def test_batch(tmp_path):
     assert len(list(tmp_path.rglob("*.png"))) == 13
     wb = load_workbook(tmp_path / "summary.xlsx")
     assert wb.sheetnames == ["Сводка", "Кривые", "Флаги", "Популяции", "Окна печати", "Выход годного",
-                             "Поверхность"]
+                             "Поверхность", "Упаковка", "Кинетика"]
     assert wb["Сводка"].max_row == 13
     html = (tmp_path / "report.html").read_text(encoding="utf-8")
-    # 13 графиков распределений + 6 графиков популяций (многомодальные образцы) + полосы окон печати
-    assert html.count("data:image/png;base64,") == 13 + 6 + 1
-    for sec in ("Популяции частиц", "окна СЛС и СЭЛС", "Выход годного", "Удельная поверхность"):
+    # 13 графиков распределений + 6 популяций (многомодальные) + полосы окон печати + кинетика
+    assert html.count("data:image/png;base64,") == 13 + 6 + 1 + 1
+    for sec in ("Популяции частиц", "окна СЛС и СЭЛС", "Выход годного", "Удельная поверхность",
+                "плотности упаковки", "Кинетика помола", "агломерация"):
         assert sec in html
     assert html.count("Допущения:") >= 3
     assert "П/С +0,5Y2O3" in html and "ОШИБКА" in html
@@ -53,7 +54,7 @@ def test_batch_with_database(tmp_path):
     dbf = tmp_path / "база.sqlite"
     run_batch(RAW, tmp_path / "out", Settings(), log=lambda *_: None, db_file=dbf)
     html = (tmp_path / "out" / "report.html").read_text(encoding="utf-8")
-    assert "Партии (база данных" in html and "уточнить" in html
+    assert "11. Партии (база данных" in html and "уточнить" in html
     from psd_lab.core import db
 
     conn = db.connect(dbf)

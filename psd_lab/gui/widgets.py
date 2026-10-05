@@ -225,11 +225,12 @@ class ReadoutBar(tk.Frame):
 class NoteBox(tk.Frame):
     """Жёлтая заметка с чёрной рамкой (как подсказка Win95): «Допущения: …», «Справка: …»."""
 
-    def __init__(self, parent, text="", title="Допущения:"):
+    def __init__(self, parent, text="", title="Допущения:", bold=False):
         super().__init__(parent, background=theme.TOOLTIP_BG, highlightbackground=theme.DARK,
                          highlightcolor=theme.DARK, highlightthickness=1)
         self.label = tk.Label(self, background=theme.TOOLTIP_BG, justify="left", anchor="w",
-                              padx=theme.px(6), pady=theme.px(4))
+                              padx=theme.px(6), pady=theme.px(4), wraplength=theme.px(640),
+                              font=theme.FONTS["bold"] if bold else theme.FONTS["ui"])
         self.label.pack(fill="x")
         self.title = title
         self.set(text)
