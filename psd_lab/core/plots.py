@@ -10,6 +10,7 @@ from pathlib import Path
 
 import matplotlib
 import matplotlib.ticker
+from matplotlib.collections import PolyCollection
 import numpy as np
 
 from .metrics import d_at
@@ -97,8 +98,12 @@ def draw_sample(fig, s: Sample, *, lang="en", bin_um=None, xmax=None, ymax=None,
     fig.clear()
     ax = fig.add_subplot(111)
     ax.set_facecolor("white")
-    ax.bar(edges[:-1], q, width=width, align="edge", color=BAR_COLOR, edgecolor="black",
-           linewidth=0.6, zorder=2)
+    # столбики одной коллекцией, а не сотней отдельных прямоугольников: на вид то же самое,
+    # но рисуется в разы быстрее (важно для сдвига и масштаба графика в окне)
+    x0 = edges[:-1]
+    verts = np.stack([np.column_stack([x0, np.zeros_like(q)]), np.column_stack([x0, q]),
+                      np.column_stack([x0 + width, q]), np.column_stack([x0 + width, np.zeros_like(q)])], axis=1)
+    ax.add_collection(PolyCollection(verts, facecolors=BAR_COLOR, edgecolors="black", linewidths=0.6, zorder=2))
     ax.set_xlim(0, xmax)
     ax.set_ylim(0, ymax)
     ax.grid(True, linestyle="--", color=GRID_COLOR, linewidth=0.6, zorder=0)
@@ -420,7 +425,9 @@ def draw_kinetics(fig, res, *, font_scale=1.0):
         ax1.annotate(name, (ti, y), textcoords="offset points", xytext=(5, 6), fontsize=8.5 * font_scale)
     ax1.set_ylabel("размер, мкм", fontstyle="italic", fontsize=fs)
     _style_ax(ax1, fs)
-    ax1.legend(loc="best", fontsize=9 * font_scale, frameon=True, edgecolor="black", fancybox=False)
+    ax1.margins(x=0.08, y=0.12)   # точки и подписи «6ч … 10ч» не прилипают к краям
+    # легенды обеих осей — справа снаружи, чтобы не закрывать точки
+    ax1.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8.5 * font_scale, frameon=False)
     for i, k in enumerate([k for k in res.d if k.startswith("frac:")]):
         ax2.plot(t, res.d[k], "s-", color=SERIES_COLORS[i % len(SERIES_COLORS)], linewidth=1.2, markersize=5,
                  label=k.split(":", 1)[1] + " мкм")

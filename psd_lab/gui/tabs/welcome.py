@@ -62,13 +62,15 @@ class WelcomePanel(tk.Frame):
         tip.pack(fill="x", pady=(0, theme.px(10)))
         tk.Label(tip, image=theme.load_icon(self, "bulb", 2 * theme.icon_px())).pack(side="left", anchor="n",
                                                                                      padx=(0, theme.px(10)))
+        # кнопку упаковываем раньше поля, чтобы при узком окне сжималось поле, а не надпись на кнопке
+        ttk.Button(tip, text="Следующий совет", command=self.next_tip).pack(side="right", anchor="s",
+                                                                            padx=(theme.px(10), 0))
         box = tk.Frame(tip, background=theme.FIELD, relief="sunken", borderwidth=2)
         box.pack(side="left", fill="both", expand=True)
         self.tip = tk.Label(box, background=theme.FIELD, justify="left", anchor="nw", wraplength=theme.px(520),
                             padx=theme.px(8), pady=theme.px(8), height=3)
         self.tip.pack(fill="both", expand=True)
-        ttk.Button(tip, text="Следующий совет", command=self.next_tip).pack(side="left", anchor="s",
-                                                                            padx=(theme.px(10), 0))
+        box.bind("<Configure>", lambda e: self.tip.configure(wraplength=max(theme.px(120), e.width - theme.px(24))))
         import random
 
         self._tip_i = random.randrange(len(TIPS))

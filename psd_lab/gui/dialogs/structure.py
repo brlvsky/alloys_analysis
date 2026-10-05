@@ -24,8 +24,6 @@ def draw_structure(fig, pts, xlabel, ylabel, font_scale=1.0):
     x = np.array([p[1] for p in pts])
     y = np.array([p[2] for p in pts])
     ax.scatter(x, y, s=46 * font_scale, color="#2a78d6", edgecolor="black", linewidth=0.7, zorder=3)
-    for name, xi, yi in pts:
-        ax.annotate(name, (xi, yi), textcoords="offset points", xytext=(6, 5), fontsize=8.5 * font_scale)
     reg = db.regression(x, y)
     if reg.slope is not None:
         xx = np.linspace(x.min(), x.max(), 50)
@@ -40,7 +38,38 @@ def draw_structure(fig, pts, xlabel, ylabel, font_scale=1.0):
     ax.set_axisbelow(True)
     ax.tick_params(labelsize=fs * 0.85)
     fig.tight_layout()
+    _place_labels(fig, ax, pts, 8.5 * font_scale)
     return reg
+
+
+# варианты положения подписи относительно точки (смещение в пунктах, выравнивание)
+_SPOTS = [((6, 5), "left"), ((6, -13), "left"), ((-6, 5), "right"), ((-6, -13), "right"),
+          ((6, 17), "left"), ((6, -25), "left"), ((-6, 17), "right"), ((-6, -25), "right")]
+
+
+def _place_labels(fig, ax, pts, fontsize):
+    """Подписи партий без наложения: для каждой точки берётся первое свободное место из _SPOTS."""
+    try:
+        renderer = fig.canvas.get_renderer()
+    except AttributeError:
+        renderer = None
+    placed = []
+    for name, xi, yi in pts:
+        ann = None
+        for off, ha in _SPOTS:
+            if ann is not None:
+                ann.remove()
+            ann = ax.annotate(name, (xi, yi), textcoords="offset points", xytext=off, ha=ha, fontsize=fontsize)
+            if renderer is None:
+                break
+            bb = ann.get_window_extent(renderer).expanded(1.05, 1.1)
+            if not any(bb.overlaps(o) for o in placed):
+                break
+        else:
+            ann.remove()   # всё занято — ставим на исходное место
+            ann = ax.annotate(name, (xi, yi), textcoords="offset points", xytext=_SPOTS[0][0], fontsize=fontsize)
+        if renderer is not None:
+            placed.append(ann.get_window_extent(renderer))
 
 
 class StructureWindow(tk.Toplevel):

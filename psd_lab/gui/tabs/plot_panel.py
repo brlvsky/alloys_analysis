@@ -87,14 +87,19 @@ class PlotPanel(tk.Frame):
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
         # стандартный тулбар matplotlib не показываем — используем его действия
         self._nav = NavigationToolbar2Tk(self.canvas, frame, pack_toolbar=False)
+        self._nav.set_message = lambda _s: None   # координаты в невидимой строке тулбара не нужны
 
         # ---- слой подсказок при наведении (курсор, точки, жёлтая подсказка) — через blitting
         self._hover_fn = None
         self._bg = None
         self._tip = None
         self._tip_rows = []
+        self._hover_drawn = False   # на холсте сейчас нарисованы курсор/точки подсказки
+        self._dragging = False      # идёт сдвиг или масштаб мышью
         self.canvas.mpl_connect("draw_event", self._on_draw)
         self.canvas.mpl_connect("motion_notify_event", self._on_move)
+        self.canvas.mpl_connect("button_press_event", self._on_press)
+        self.canvas.mpl_connect("button_release_event", self._on_release)
         self.canvas.mpl_connect("figure_leave_event", lambda e: self.hide_hover())
         self.canvas.get_tk_widget().bind("<Leave>", lambda e: self.hide_hover(), add="+")
 
@@ -108,14 +113,39 @@ class PlotPanel(tk.Frame):
         self.hide_hover()
 
     def _on_draw(self, _e=None):
+        # фон для подсказки копируем лениво (в show_hover), а не после каждой перерисовки:
+        # при сдвиге графика перерисовок десятки в секунду
+        self._bg = None
+        self._hover_drawn = False
+
+    def _grab_bg(self):
         try:
             self._bg = self.canvas.copy_from_bbox(self.figure.bbox)
         except Exception:  # noqa: BLE001
             self._bg = None
 
-    def _on_move(self, ev):
-        if self._hover_fn is None or self._nav.mode.name in ("ZOOM", "PAN"):
+    def _navigating(self) -> bool:
+        return self._nav.mode.name in ("ZOOM", "PAN")
+
+    def _on_press(self, _ev):
+        """Начало сдвига/масштаба: «замораживаем» раскладку графика. Пересчёт полей (tight layout)
+        на каждом кадре сдвига удваивал время перерисовки и заставлял график дёргаться."""
+        if self._navigating():
+            self._dragging = True
             self.hide_hover()
+            if self.figure.get_layout_engine() is not None:
+                self.figure.set_layout_engine("none")
+
+    def _on_release(self, _ev):
+        if self._dragging:
+            self._dragging = False
+            self.figure.set_layout_engine("tight")
+            self.canvas.draw_idle()
+
+    def _on_move(self, ev):
+        if self._hover_fn is None or self._navigating():
+            if self._hover_drawn or (self._tip is not None and self._tip.winfo_ismapped()):
+                self.hide_hover()
             return
         try:
             info = self._hover_fn(ev)
@@ -130,7 +160,7 @@ class PlotPanel(tk.Frame):
         from matplotlib.patches import Rectangle
 
         if self._bg is None:
-            self._on_draw()
+            self._grab_bg()
         if self._bg is not None:
             self.canvas.restore_region(self._bg)
             artists = []
@@ -146,6 +176,7 @@ class PlotPanel(tk.Frame):
             for a in artists:
                 a.axes.draw_artist(a)
             self.canvas.blit(self.figure.bbox)
+            self._hover_drawn = True
             for a in artists:
                 a.remove()
         self._show_tip(info, px_x, self.figure.bbox.height - px_y)
@@ -190,12 +221,13 @@ class PlotPanel(tk.Frame):
     def hide_hover(self):
         if self._tip is not None:
             self._tip.place_forget()
-        if self._bg is not None:
+        if self._hover_drawn and self._bg is not None:
             try:
                 self.canvas.restore_region(self._bg)
                 self.canvas.blit(self.figure.bbox)
             except Exception:  # noqa: BLE001
                 pass
+        self._hover_drawn = False
 
     def hover_at(self, ax, x, y):
         """Показать подсказку в точке данных (для самопроверки и тестов). Возвращает HoverInfo."""

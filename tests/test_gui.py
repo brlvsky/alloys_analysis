@@ -210,3 +210,37 @@ def test_hover_tooltips(win):
     assert info is not None and len(info.rows) == len(win.enabled_samples())
     win.dist.hide_hover()
     win.cmp.hide_hover()
+
+
+def test_pan_freezes_layout(win):
+    """Сдвиг графика: на время перетаскивания раскладка «замораживается» (без tight layout на каждом
+    кадре), после отпускания — снова tight; столбики — одна коллекция, а не сотни прямоугольников."""
+    from matplotlib.backend_bases import MouseButton, MouseEvent
+    from matplotlib.layout_engine import TightLayoutEngine
+
+    if not win.all_samples():
+        win.load_paths([RAW])
+    win.nb.select(0)
+    win.root.update()
+    p = win.dist
+    p.draw()
+    p.canvas.draw()
+    ax = p.figure.axes[0]
+    assert len(ax.patches) == 0 and len(ax.collections) == 1
+    c = p.canvas
+    x, y = ax.bbox.x0 + ax.bbox.width / 2, ax.bbox.y0 + ax.bbox.height / 2
+    p.pan()
+    try:
+        c.callbacks.process("button_press_event", MouseEvent("button_press_event", c, x, y, MouseButton.LEFT))
+        assert not isinstance(p.figure.get_layout_engine(), TightLayoutEngine)
+        x0 = ax.get_xlim()[0]
+        c.callbacks.process("motion_notify_event", MouseEvent("motion_notify_event", c, x + 40, y,
+                                                              MouseButton.LEFT, buttons={MouseButton.LEFT}))
+        assert p._hover_drawn is False
+        c.callbacks.process("button_release_event", MouseEvent("button_release_event", c, x + 40, y,
+                                                               MouseButton.LEFT))
+        assert ax.get_xlim()[0] != x0                       # график сдвинулся
+        assert isinstance(p.figure.get_layout_engine(), TightLayoutEngine)
+    finally:
+        p.pan()
+        p.home()

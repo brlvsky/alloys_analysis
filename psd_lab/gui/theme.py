@@ -27,10 +27,7 @@ SELECT_BG = "#000080"   # выделение
 SELECT_FG = "#FFFFFF"
 TITLE_BG = "#000080"    # заголовок панели
 TITLE_FG = "#FFFFFF"
-TITLE_BG2 = "#1084D0"   # правый край градиента заголовка (Windows 98)
-LCD_BG = "#000000"      # «дисплей прибора» для результатов
-LCD_FG = "#00FF00"
-LCD_WARN = "#FF4040"
+WARN_FG = "#FF0000"     # текст значения вне допустимого
 PROGRESS = "#000080"    # блоки индикатора прогресса
 TOOLTIP_BG = "#FFFFE1"
 FLAG_COLORS = {"ERROR": ("#FF0000", "#FFFFFF"), "WARN": ("#FFFF00", "#000000"), "INFO": ("#0000FF", "#FFFFFF")}
@@ -91,7 +88,7 @@ def apply(root: tk.Tk, user_scale: float = 0) -> None:
     fam = _pick_family(fams)
     mono = next((f for f in ("Courier New", "Liberation Mono", "DejaVu Sans Mono") if f in fams), "TkFixedFont")
     FONTS.update(ui=(fam, 8), bold=(fam, 8, "bold"), mono=(mono, 9), big=(fam, 12, "bold"),
-                 readout=(fam, 10), readout_label=(fam, 8), small=(fam, 7), lcd=(mono, 10, "bold"))
+                 readout=(fam, 10), readout_label=(fam, 8), small=(fam, 7))
     for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont", "TkCaptionFont",
                  "TkSmallCaptionFont", "TkIconFont", "TkTooltipFont"):
         try:
@@ -149,6 +146,7 @@ def apply(root: tk.Tk, user_scale: float = 0) -> None:
                  rowheight=max(line + px(5), icon_px() + px(3)), borderwidth=bw, relief="sunken", font=ui,
                  indent=px(18))
     st.map("Treeview", background=[("selected", SELECT_BG)], foreground=[("selected", SELECT_FG)])
+    _tree_indicators(root, st)
     st.configure("Treeview.Heading", background=FACE, relief="raised", borderwidth=bw, font=ui,
                  padding=(px(4), px(2)))
     st.map("Treeview.Heading", relief=[("pressed", "sunken")], background=[("active", FACE)])
@@ -156,10 +154,39 @@ def apply(root: tk.Tk, user_scale: float = 0) -> None:
                  arrowsize=px(16), width=px(16))
     st.configure("TEntry", fieldbackground=FIELD, relief="sunken", borderwidth=2, padding=px(2))
     st.configure("TCombobox", fieldbackground=FIELD, background=FACE, arrowsize=px(14), padding=px(2))
+    # раскрывающийся список «только выбор» в Windows 95 — белое поле, а не серое
+    st.map("TCombobox", fieldbackground=[("disabled", FACE), ("readonly", FIELD)],
+           foreground=[("disabled", SHADOW)])
     st.configure("TCheckbutton", background=FACE)
     st.configure("TRadiobutton", background=FACE)
     st.configure("TPanedwindow", background=FACE)
     st.configure("Sash", sashthickness=px(6), background=FACE, gripcount=0)
+
+
+def _tree_indicators(root: tk.Misc, st: ttk.Style) -> None:
+    """Значки «+» / «−» в квадратике у узлов дерева, как в Проводнике Windows 95 (вместо треугольников)."""
+    from PIL import Image, ImageDraw, ImageTk
+
+    k = max(1, icon_px() // 16)
+
+    def box(kind: str):
+        img = Image.new("RGBA", (9, 9), (0, 0, 0, 0))
+        if kind != "leaf":
+            d = ImageDraw.Draw(img)
+            d.rectangle([0, 0, 8, 8], fill=FIELD, outline=SHADOW)
+            d.line([2, 4, 6, 4], fill=DARK)
+            if kind == "plus":
+                d.line([4, 2, 4, 6], fill=DARK)
+        return ImageTk.PhotoImage(img.resize((9 * k, 9 * k), Image.NEAREST), master=root)
+
+    imgs = {n: box(n) for n in ("plus", "minus", "leaf")}
+    _ICON_CACHE[("tree-indicator", id(root))] = imgs   # держим ссылки на картинки
+    try:
+        # user1 — узел раскрыт, user2 — лист (состояния Treeview в Tk 8.6)
+        st.element_create("Treeitem.indicator", "image", imgs["plus"], ("user2", imgs["leaf"]),
+                          ("user1", imgs["minus"]), sticky="", padding=(px(2), 0, px(5), 0))
+    except tk.TclError:   # уже создан в этой теме (повторный вызов apply)
+        pass
 
 
 def fig_dpi() -> float:

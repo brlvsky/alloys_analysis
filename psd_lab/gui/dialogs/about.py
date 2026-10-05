@@ -6,7 +6,7 @@ import tkinter as tk
 
 from ... import APP_NAME, PROJECT, __version__
 from .. import theme
-from ..widgets import ChunkProgress, Dialog, gradient_image
+from ..widgets import ChunkProgress, Dialog
 
 
 def library_versions() -> str:
@@ -39,7 +39,7 @@ class AboutDialog(Dialog):
 
 
 class Splash(tk.Toplevel):
-    """Заставка: градиентная полоса с названием, значок, «Загрузка модулей…» и блочный индикатор."""
+    """Заставка: тёмно-синяя полоса с названием, значок, «Загрузка модулей…» и блочный индикатор."""
 
     def __init__(self, root: tk.Tk):
         super().__init__(root)
@@ -47,10 +47,8 @@ class Splash(tk.Toplevel):
         self.configure(background=theme.FACE, relief="raised", borderwidth=2)
         w = theme.px(420)
         bar_h = theme.px(46)
-        self._grad = gradient_image(self, w, bar_h, theme.TITLE_BG, theme.TITLE_BG2)
-        c = tk.Canvas(self, width=w, height=bar_h, highlightthickness=0, borderwidth=0)
+        c = tk.Canvas(self, width=w, height=bar_h, highlightthickness=0, borderwidth=0, background=theme.TITLE_BG)
         c.pack(fill="x", padx=2, pady=2)
-        c.create_image(0, 0, image=self._grad, anchor="nw")
         c.create_text(theme.px(12), bar_h // 2, text=APP_NAME, anchor="w", fill="white", font=theme.FONTS["big"])
         c.create_text(w - theme.px(12), bar_h // 2, text=f"версия {__version__}", anchor="e", fill="white",
                       font=theme.FONTS["ui"])

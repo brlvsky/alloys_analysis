@@ -125,72 +125,14 @@ class StatusBar(tk.Frame):
         self.progress.set(fraction)
 
 
-class PanelTitle(tk.Canvas):
-    """Заголовок панели: градиент тёмно-синий → голубой (как заголовок окна Windows 98), белый жирный текст.
-
-    Совместим с Label: configure(text=…), cget("text").
-    """
+class PanelTitle(tk.Label):
+    """Заголовок панели: сплошная тёмно-синяя полоса с белым жирным текстом (как заголовок окна Windows 95)."""
 
     def __init__(self, parent, text=""):
-        import tkinter.font as tkfont
-
-        f = tkfont.Font(root=parent, font=theme.FONTS.get("bold"))
-        self._h = f.metrics("linespace") + 2 * theme.px(2)
-        super().__init__(parent, height=self._h, width=theme.px(40), highlightthickness=0, borderwidth=0,
-                         background=theme.TITLE_BG)
-        self._text = text
-        self._img = None
-        self._width = 0   # не «_w»: это внутреннее имя виджета в tkinter
-        self.bind("<Configure>", self._redraw)
-
-    def configure(self, cnf=None, **kw):  # noqa: D102
-        if "text" in kw:
-            self._text = kw.pop("text")
-            self._draw_text()
-        if kw or cnf:
-            return super().configure(cnf, **kw)
-        return None
-
-    config = configure
-
-    def cget(self, key):
-        return self._text if key == "text" else super().cget(key)
-
-    def _redraw(self, e=None):
-        w = max(2, (e.width if e else self.winfo_width()))
-        if w != self._width:
-            self._width = w
-            self._img = gradient_image(self, w, self._h, theme.TITLE_BG, theme.TITLE_BG2)
-            self.delete("bg")
-            self.create_image(0, 0, image=self._img, anchor="nw", tags="bg")
-            self.tag_lower("bg")
-        self._draw_text()
-
-    def _draw_text(self):
-        self.delete("txt")
-        self.create_text(theme.px(6), self._h // 2, text=self._text, anchor="w", fill=theme.TITLE_FG,
-                         font=theme.FONTS.get("bold"), tags="txt")
-
-
-_GRAD_CACHE: dict = {}
-
-
-def gradient_image(master, w, h, c1, c2):
-    """Горизонтальный градиент (PhotoImage), кэшируется по размеру."""
-    key = (w, h, c1, c2)
-    if key not in _GRAD_CACHE:
-        import numpy as np
-        from PIL import Image, ImageTk
-
-        a = np.array([int(c1[i:i + 2], 16) for i in (1, 3, 5)], float)
-        b = np.array([int(c2[i:i + 2], 16) for i in (1, 3, 5)], float)
-        k = np.linspace(0, 1, w)[:, None]
-        row = (a + (b - a) * k).astype("uint8")[None, :, :]
-        img = Image.fromarray(np.repeat(row, h, axis=0), "RGB")
-        if len(_GRAD_CACHE) > 64:
-            _GRAD_CACHE.clear()
-        _GRAD_CACHE[key] = ImageTk.PhotoImage(img, master=master)
-    return _GRAD_CACHE[key]
+        # width=1: ширину задаёт раскладка (fill="x"), длинный текст не распирает левую панель
+        super().__init__(parent, text=text, width=1, anchor="w", background=theme.TITLE_BG,
+                         foreground=theme.TITLE_FG, font=theme.FONTS.get("bold"), padx=theme.px(5),
+                         pady=theme.px(2))
 
 
 class ChunkProgress(tk.Canvas):
@@ -292,7 +234,8 @@ class Dialog(tk.Toplevel):
 
 
 class ReadoutBar(tk.Frame):
-    """Ряд «окошек» с результатами, как на дисплее прибора: подпись сверху, зелёные цифры на чёрном.
+    """Ряд полей с результатами, как поля «только чтение» в окнах свойств Windows 95: подпись сверху,
+    белое вдавленное поле с чёрным текстом (красный — значение вне допустимого).
     Окошки переносятся на следующую строку, если не помещаются по ширине.
     set_fields(['d10, мкм', …]) → set_values(['5,81', …])."""
 
@@ -315,8 +258,8 @@ class ReadoutBar(tk.Frame):
         for lab in labels:
             cell = tk.Frame(self.box, background=theme.FACE)
             tk.Label(cell, text=lab, font=theme.FONTS["readout_label"], anchor="w").pack(fill="x")
-            v = tk.Label(cell, text="—", font=theme.FONTS["lcd"], anchor="e", relief="sunken",
-                         borderwidth=2, background=theme.LCD_BG, foreground=theme.LCD_FG,
+            v = tk.Label(cell, text="—", font=theme.FONTS["ui"], anchor="e", relief="sunken",
+                         borderwidth=2, background=theme.FIELD, foreground=theme.TEXT,
                          width=8 if lab in wide else 6, padx=theme.px(4), pady=theme.px(1))
             v.pack(fill="x")
             self.cells.append(cell)
@@ -338,10 +281,10 @@ class ReadoutBar(tk.Frame):
             c.grid(row=i // cols, column=i % cols, sticky="we", padx=(0, theme.px(6)), pady=(0, theme.px(2)))
 
     def set_values(self, values: list[str], colors: list[str | None] | None = None):
-        """colors: None — обычный зелёный «дисплей», любой цвет — предупреждение (красные цифры)."""
+        """colors: None — обычный чёрный текст, любой цвет — предупреждение (красный текст)."""
         colors = colors or [None] * len(values)
         for lab, v, c in zip(self.values, values, colors):
-            lab.configure(text=v, foreground=theme.LCD_WARN if c else theme.LCD_FG)
+            lab.configure(text=v, foreground=theme.WARN_FG if c else theme.TEXT)
 
 
 class NoteBox(tk.Frame):
@@ -380,13 +323,16 @@ class Table(tk.Frame):
         self.tree.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
         self.tree.pack(fill="both", expand=True)
-        ch = tkfont.Font(root=self, font=theme.FONTS["ui"]).measure("0") + 1
+        f = tkfont.Font(root=self, font=theme.FONTS["ui"])
+        ch = f.measure("0") + 1
+        # колонка не уже своего заголовка — иначе «Медиана, мкм» обрезается до «Медиана, мк»
+        fit = lambda name, w: max(w * ch, f.measure(name) + theme.px(14))  # noqa: E731
         if tree_col:
             self.tree.heading("#0", text=tree_col[0])
-            self.tree.column("#0", width=tree_col[1] * ch, stretch=False)
+            self.tree.column("#0", width=fit(tree_col[0], tree_col[1]), stretch=False)
         for i, (name, w, anchor) in enumerate(columns):
             self.tree.heading(f"c{i}", text=name)
-            self.tree.column(f"c{i}", width=w * ch, anchor=anchor, stretch=(i == 0))
+            self.tree.column(f"c{i}", width=fit(name, w), anchor=anchor, stretch=(i == 0))
 
     def fill(self, rows, images=None, texts=None):
         self.tree.delete(*self.tree.get_children())

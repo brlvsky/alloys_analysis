@@ -295,7 +295,8 @@ class SurfaceTab(tk.Frame):
             _empty(self.plot, "Выберите образец слева")
             return
         self.read.set_values([c(surface.ssa_m2_g(s, rho), 3), c(d32(s), 2), c(rho, 2)])
-        self.headline.configure(text=f"{s.name}: {surface.headline(s)}")
+        h = surface.headline(s)
+        self.headline.configure(text=f"{s.name} — {h[0].lower()}{h[1:]}")
         rows = surface.shares(s, st.windows)
         self._draw = lambda fig, fs=1.0: draw_surface(fig, rows, font_scale=fs)
         self._name = f"поверхность_{s.name}"
