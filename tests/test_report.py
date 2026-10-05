@@ -1,4 +1,4 @@
-"""Пакетный режим: графики, summary.xlsx, report.html."""
+"""Пакетный режим: графики, summary.xlsx, report.html, report.docx."""
 from pathlib import Path
 
 import pytest
@@ -30,6 +30,18 @@ def test_batch(tmp_path):
     assert html.count("Допущения:") >= 3
     assert "П/С +0,5Y2O3" in html and "ОШИБКА" in html
     assert "src='http" not in html and 'src="http' not in html  # самодостаточный файл
+
+    # Word: те же разделы и картинки, что в HTML (собраны из одного списка блоков)
+    import docx
+
+    d = docx.Document(str(tmp_path / "report.docx"))
+    text = "\n".join(p.text for p in d.paragraphs)
+    for sec in ("1. Сводная таблица", "2. Качество измерений", "Популяции частиц", "Кинетика помола"):
+        assert sec in text
+    assert "Допущения:" in text
+    cells = [c.text for t in d.tables for row in t.rows for c in row.cells]
+    assert "П/С +0,5Y2O3" in cells and "19,64" in cells          # сводная таблица
+    assert len(d.inline_shapes) == 13 + 6 + 1 + 1                   # считаются и картинки в таблицах
 
 
 def test_windows_text_roundtrip():

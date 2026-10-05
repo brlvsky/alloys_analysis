@@ -91,6 +91,16 @@ def run_pyinstaller():
     PyInstaller.__main__.run(args)
 
 
+def fix_docx_paths():
+    """python-docx открывает шаблоны по пути «docx/parts/../templates/…». В сборке модули лежат в архиве,
+    папки docx/parts нет, и такой путь не открывается (ошибка при создании колонтитула отчёта Word).
+    Создаём пустую папку — путь становится рабочим."""
+    for base in (APP_DIR / "_internal" / "docx", APP_DIR / "docx"):
+        if (base / "templates").is_dir():
+            (base / "parts").mkdir(exist_ok=True)
+            print(f"docx: создана папка {base / 'parts'}")
+
+
 def copy_examples():
     src = ROOT / "data" / "raw"
     dst = APP_DIR / "examples"
@@ -158,6 +168,7 @@ def main() -> int:
     if not EXE.exists():
         print(f"ОШИБКА: не найден {EXE}")
         return 1
+    fix_docx_paths()
     copy_examples()
     step("Самопроверка собранной программы (путь с кириллицей и пробелами)")
     if not selftest_from_cyrillic_path():

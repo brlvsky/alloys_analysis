@@ -1,7 +1,5 @@
-"""Разделы отчёта и листы Excel для модулей М2–М5."""
+"""Разделы отчёта (блоки для HTML и Word) и листы Excel для модулей М2–М6, М9."""
 from __future__ import annotations
-
-import html
 
 from . import deconv, surface, windows
 from .metrics import d32, window_label
@@ -11,28 +9,17 @@ def _c(v, nd=1):
     return "—" if v is None or v != v else f"{v:.{nd}f}".replace(".", ",")
 
 
-def _table(head, rows, num_from=1):
-    h = ["<div class='scroll'><table><tr>"] + [f"<th>{html.escape(x)}</th>" for x in head] + ["</tr>"]
-    for r in rows:
-        h.append("<tr>" + "".join(
-            f"<td class='n'>{html.escape(str(v))}</td>" if i >= num_from else f"<td>{html.escape(str(v))}</td>"
-            for i, v in enumerate(r)) + "</tr>")
-    h.append("</table></div>")
-    return "".join(h)
-
-
-def _note(title, text):
-    return f"<p class='note'><b>{html.escape(title)}</b> {html.escape(text)}</p>"
-
-
-# ==================================================================== HTML
-def html_sections(samples, st, fig, fig_b64, start=5) -> list[str]:
-    from .plots import draw_populations, draw_tech_bars
+# ==================================================================== разделы отчёта (блоки)
+def module_blocks(samples, st, fig, start=5) -> tuple[list, int]:
+    """Разделы модулей М2–М6, М9. Возвращает (блоки, номер следующего раздела)."""
+    from . import kinetics, packing
+    from .plots import draw_kinetics, draw_populations, draw_tech_bars
+    from .report_doc import Bullets, Heading, Image, Note, Para, Table, fig_png
 
     out = []
     n = start
     # ---------- М2
-    out.append(f"<h2>{n}. Популяции частиц (разложение на логнормальные компоненты)</h2>")
+    out.append(Heading(f"{n}. Популяции частиц (разложение на логнормальные компоненты)"))
     rows, multi = [], []
     for s in samples:
         r = deconv.fit(s)
@@ -42,37 +29,35 @@ def html_sections(samples, st, fig, fig_b64, start=5) -> list[str]:
                      _c(coarse.weight_pct) if coarse else "—", _c(coarse.mode_um, 0) if coarse else "—"])
         if r.bimodal:
             multi.append((s, r))
-    out.append(_table(["Образец", "Компонент (BIC)", "R²", "Популяций", "Мелкая, %", "мода, мкм",
-                       "Крупная, %", "мода, мкм"], rows))
-    out.append(_note("Подсказка.", "Доля мелкой популяции у П/С (30–80 %) на порядок больше объёмной доли добавки "
-                     "(0,5–1,5 мас.% ≈ 1–3 об.%), значит мелкая мода — не сама добавка; её происхождение "
-                     "(агломераты? продукт обработки?) надо проверять СЭМ и измерением с разной мощностью "
-                     "ультразвука."))
-    out.append(_note("Допущения:", "каждая популяция описывается логнормальным законом; число компонент — по BIC; "
-                     "популяции — группы компонент между провалами плотности q3*. Компоненты < 3 % отдельно не "
-                     "показываются."))
+    out.append(Table(["Образец", "Компонент (BIC)", "R²", "Популяций", "Мелкая, %", "мода, мкм",
+                      "Крупная, %", "мода, мкм"], rows))
+    out.append(Note("Подсказка.", "Доля мелкой популяции у П/С (30–80 %) на порядок больше объёмной доли добавки "
+                    "(0,5–1,5 мас.% ≈ 1–3 об.%), значит мелкая мода — не сама добавка; её происхождение "
+                    "(агломераты? продукт обработки?) надо проверять СЭМ и измерением с разной мощностью "
+                    "ультразвука."))
+    out.append(Note("Допущения:", "каждая популяция описывается логнормальным законом; число компонент — по BIC; "
+                    "популяции — группы компонент между провалами плотности q3*. Компоненты < 3 % отдельно не "
+                    "показываются."))
     for s, r in multi:
         draw_populations(fig, s, r, lang=st.lang)
-        out.append(f"<div class='card'><b>{html.escape(s.label)}</b><br>"
-                   f"<img alt='' src='data:image/png;base64,{fig_b64(fig)}'></div>")
+        out.append(Image(fig_png(fig), caption=s.label))
     n += 1
 
     # ---------- М3
     sls, ebm = st.sls, st.ebm
-    out.append(f"<h2>{n}. Технология: окна СЛС и СЭЛС</h2>")
+    out.append(Heading(f"{n}. Технология: окна СЛС и СЭЛС"))
     draw_tech_bars(fig, samples, sls, ebm)
-    out.append(f"<img alt='Окна печати' src='data:image/png;base64,{fig_b64(fig)}'>")
+    out.append(Image(fig_png(fig), alt="Окна печати"))
     wins = [("СЛС", tuple(w)) for w in st.sls_windows] + [("СЭЛС", tuple(w)) for w in st.ebm_windows]
     head = ["Образец"] + [f"{t} {w[0]:g}–{w[1]:g}, %" for t, w in wins]
-    out.append(_table(head, [[s.label] + [_c(windows.frac(s, *w)) for _, w in wins] for s in samples]))
-    out.append("<ul>" + "".join(f"<li><b>{html.escape(s.label)}</b>: {html.escape(windows.facts_text(s, sls, ebm))}"
-                                "</li>" for s in samples) + "</ul>")
-    out.append(_note("Справка (проверить по источникам):", windows.TECH_NOTE.split(": ", 1)[1]))
+    out.append(Table(head, [[s.label] + [_c(windows.frac(s, *w)) for _, w in wins] for s in samples]))
+    out.append(Bullets([(s.label, windows.facts_text(s, sls, ebm)) for s in samples]))
+    out.append(Note("Справка (проверить по источникам):", windows.TECH_NOTE.split(": ", 1)[1]))
     n += 1
 
     # ---------- М4
     lo, hi = st.sieve_window
-    out.append(f"<h2>{n}. Выход годного после рассева {lo:g}–{hi:g} мкм</h2>")
+    out.append(Heading(f"{n}. Выход годного после рассева {lo:g}–{hi:g} мкм"))
     rows = []
     for s in samples:
         sv = windows.sieve(s, lo, hi)
@@ -80,34 +65,30 @@ def html_sections(samples, st, fig, fig_b64, start=5) -> list[str]:
         before = windows.requirements_check(s, st.requirements)
         rows.append([s.label, _c(sv.yield_pct), _c(sv.fines_pct), _c(sv.coarse_pct), f"{sv.grams_per_kg():.0f}",
                      f"{sum(r.ok for r in before)}/{len(before)}", f"{sum(r.ok for r in after)}/{len(after)}"])
-    out.append(_table(["Образец", "Годное, %", "Мелочь, %", "Крупное, %", "Из 1 кг, г",
-                       "Требования: исходный", "после рассева"], rows))
+    out.append(Table(["Образец", "Годное, %", "Мелочь, %", "Крупное, %", "Из 1 кг, г",
+                      "Требования: исходный", "после рассева"], rows))
     req = st.requirements
-    out.append(_note("Требования:", f"d10 ≥ {req['d10_min']:g} мкм; d50 {req['d50_min']:g}–{req['d50_max']:g} мкм; "
-                     f"d90 ≤ {req['d90_max']:g} мкм; мельче {req['d10_min']:g} мкм ≤ 10 %. " + windows.REQ_NOTE))
-    out.append(_note("Допущения:", windows.SIEVE_NOTE))
+    out.append(Note("Требования:", f"d10 ≥ {req['d10_min']:g} мкм; d50 {req['d50_min']:g}–{req['d50_max']:g} мкм; "
+                    f"d90 ≤ {req['d90_max']:g} мкм; мельче {req['d10_min']:g} мкм ≤ 10 %. " + windows.REQ_NOTE))
+    out.append(Note("Допущения:", windows.SIEVE_NOTE))
     n += 1
 
     # ---------- М5
     rho = st.density_g_cm3
-    out.append(f"<h2>{n}. Удельная поверхность и риск по кислороду</h2>")
+    out.append(Heading(f"{n}. Удельная поверхность и риск по кислороду"))
     rows = []
     for s in samples:
         v, a = surface.fine_shares(s)
         rows.append([s.label, _c(d32(s), 2), _c(surface.ssa_m2_g(s, rho), 3), _c(v), _c(a)])
-    out.append(_table(["Образец", "D[3,2], мкм", f"SSA при ρ = {_c(rho, 2)} г/см³, м²/г", "< 15 мкм: % объёма",
-                       "< 15 мкм: % поверхности"], rows))
-    out.append("<ul>" + "".join(f"<li><b>{html.escape(s.label)}</b>: {html.escape(surface.headline(s))}</li>"
-                                for s in samples) + "</ul>")
-    out.append(_note("Формула:", "SSA [м²/г] = 6 / (ρ [г/см³] · D[3,2] [мкм]) — нижняя оценка для сферических частиц."))
-    out.append(_note("Допущения:", surface.ASSUMPTIONS.split(": ", 1)[1]))
+    out.append(Table(["Образец", "D[3,2], мкм", f"SSA при ρ = {_c(rho, 2)} г/см³, м²/г", "< 15 мкм: % объёма",
+                      "< 15 мкм: % поверхности"], rows))
+    out.append(Bullets([(s.label, surface.headline(s)) for s in samples]))
+    out.append(Note("Формула:", "SSA [м²/г] = 6 / (ρ [г/см³] · D[3,2] [мкм]) — нижняя оценка для сферических частиц."))
+    out.append(Note("Допущения:", surface.ASSUMPTIONS.split(": ", 1)[1]))
     n += 1
 
     # ---------- М6
-    from . import kinetics, packing
-    from .plots import draw_kinetics
-
-    out.append(f"<h2>{n}. Оценка плотности упаковки слоя (двухмодальные порошки)</h2>")
+    out.append(Heading(f"{n}. Оценка плотности упаковки слоя (двухмодальные порошки)"))
     rows = []
     for s in samples:
         e = packing.estimate(deconv.fit(s), st.packing_phi0)
@@ -115,12 +96,12 @@ def html_sections(samples, st, fig, fig_b64, start=5) -> list[str]:
             rows.append([s.label, _c(e.d_fine, 1), _c(e.d_coarse, 1), _c(e.r, 3), _c(100 * e.x_fine), _c(e.phi, 3),
                          _c(100 * e.x_opt), _c(e.phi_opt, 3)])
     if rows:
-        out.append(_table(["Образец", "d мелк., мкм", "d крупн., мкм", "r", "Мелкой, %", "φ образца",
-                           "Мелкой в оптимуме, %", "φ в оптимуме"], rows))
+        out.append(Table(["Образец", "d мелк., мкм", "d крупн., мкм", "r", "Мелкой, %", "φ образца",
+                          "Мелкой в оптимуме, %", "φ в оптимуме"], rows))
     else:
-        out.append("<p>Двухмодальных образцов нет — модель бинарной смеси неприменима.</p>")
-    out.append(f"<p class='note'><b>Допущения: {html.escape(packing.ASSUMPTIONS)}</b></p>")
-    out.append(_note("Модель:", packing.SOURCE + f" φ₀ = {_c(st.packing_phi0, 2)}."))
+        out.append(Para("Двухмодальных образцов нет — модель бинарной смеси неприменима."))
+    out.append(Note("Допущения:", packing.ASSUMPTIONS, bold=True))
+    out.append(Note("Модель:", packing.SOURCE + f" φ₀ = {_c(st.packing_phi0, 2)}."))
     n += 1
 
     # ---------- М9
@@ -128,21 +109,20 @@ def html_sections(samples, st, fig, fig_b64, start=5) -> list[str]:
     pairs = [(s, t) for s, t in pairs if t is not None]
     if pairs:
         res = kinetics.analyse(pairs, st.windows_tuples)
-        out.append(f"<h2>{n}. Кинетика помола</h2>")
+        out.append(Heading(f"{n}. Кинетика помола"))
         draw_kinetics(fig, res)
-        out.append(f"<img alt='Кинетика' src='data:image/png;base64,{fig_b64(fig)}'>")
-        out.append(_table(["Образец", "Время, ч", "d10, мкм", "d50, мкм", "d90, мкм"],
-                          [[nm, _c(t, 1), _c(a, 2), _c(b, 2), _c(c2, 2)] for nm, t, a, b, c2 in
-                           zip(res.names, res.times, res.d["d10"], res.d["d50"], res.d["d90"])]))
+        out.append(Image(fig_png(fig), alt="Кинетика"))
+        out.append(Table(["Образец", "Время, ч", "d10, мкм", "d50, мкм", "d90, мкм"],
+                         [[nm, _c(t, 1), _c(a, 2), _c(b, 2), _c(c2, 2)] for nm, t, a, b, c2 in
+                          zip(res.names, res.times, res.d["d10"], res.d["d50"], res.d["d90"])]))
         for w in res.warnings:
-            out.append(_note("Внимание:", w + "."))
+            out.append(Note("Внимание:", w + "."))
         for h in res.hints:
-            out.append(_note("Подсказка:", h))
+            out.append(Note("Подсказка:", h))
         if any(str(s.file).replace("\\", "/").split("/")[-1].lower().startswith("расчет") for s, _ in pairs):
-            out.append(_note("Пометка:", kinetics.OLD_DATA_NOTE))
+            out.append(Note("Пометка:", kinetics.OLD_DATA_NOTE))
         n += 1
-    out.append(f"<!--next:{n}-->")
-    return out
+    return out, n
 
 
 def _time(s, st):
@@ -152,6 +132,10 @@ def _time(s, st):
     if v == "":
         return None
     return v if v is not None else time_from_name(s.name)
+
+
+def _r(v, nd=3):
+    return None if v is None or v != v else round(float(v), nd)
 
 
 # ==================================================================== Excel
@@ -169,6 +153,24 @@ def xlsx_sheets(wb, samples, st, head_font, head_fill) -> None:
             ws.column_dimensions[get_column_letter(i)].width = w
         ws.freeze_panes = "B2"
         return ws
+
+    from .report import report_pair
+
+    pair = report_pair(samples, st)
+    if pair is not None:
+        from . import compare2
+
+        d = compare2.compare(*pair, st.windows_tuples)
+        ws = sheet("До и после", ["Показатель", "A", "B", "B − A", "Изменение, %"],
+                   [[m.name + (f", {m.unit}" if m.unit else ""), _r(m.a), _r(m.b), _r(m.delta),
+                     _r(m.rel_pct) if m.rel_pct is not None else None] for m in d.metrics], [16, 11, 11, 11, 13])
+        ws.append([])
+        ws.append([f"A — {d.a.label}; B — {d.b.label}"])
+        ws.append([compare2.summary_text(d)])
+        ws.append([])
+        ws.append(["Размер, мкм", "ΣQ(A), %", "ΣQ(B), %", "ΔΣQ, п.п."])
+        for x, ca, cb in zip(d.grid, d.cum_a, d.cum_b):
+            ws.append([float(x), round(float(ca), 3), round(float(cb), 3), round(float(cb - ca), 3)])
 
     rows = []
     for s in samples:
@@ -245,11 +247,13 @@ def xlsx_sheets(wb, samples, st, head_font, head_fill) -> None:
             ws.append([line])
 
 
-def batches_section(batches: list[dict], n: int) -> list[str]:
+def batches_blocks(batches: list[dict], n: int) -> list:
     """Таблица партий из базы «структура — свойства»."""
+    from .report_doc import Heading, Table
+
     rows = [[b["name"], b.get("alloy") or "—", b.get("state") or "—", b.get("additive") or "—",
              _c(b.get("additive_wt_pct"), 1) if b.get("additive_wt_pct") is not None else "—",
              b.get("route") or "—", b.get("notes") or ""] for b in batches]
-    return [f"<h2>{n}. Партии (база данных «структура — свойства»)</h2>",
-            _table(["Партия", "Сплав", "Состояние", "Добавка", "мас.%", "Маршрут получения", "Примечания"], rows,
-                   num_from=99)]
+    return [Heading(f"{n}. Партии (база данных «структура — свойства»)"),
+            Table(["Партия", "Сплав", "Состояние", "Добавка", "мас.%", "Маршрут получения", "Примечания"], rows,
+                  num_from=99)]

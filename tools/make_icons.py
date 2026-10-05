@@ -169,6 +169,19 @@ def excel():
     return img
 
 
+def word():
+    """Документ Word: лист с текстом и синий значок «W»."""
+    img, d = canvas()
+    d.polygon([(3, 0), (11, 0), (14, 3), (14, 15), (3, 15)], fill=W, outline=K)
+    d.line((11, 0, 11, 3), fill=K)
+    d.line((11, 3, 14, 3), fill=K)
+    for y in (5, 7, 9, 11, 13):
+        d.line((9, y, 12, y), fill=D)
+    d.rectangle((0, 4, 8, 12), fill=N, outline=K)
+    glyph(d, ["#...#", "#...#", "#.#.#", "#.#.#", ".#.#."], 2, 6, W)
+    return img
+
+
 # «Обновить»: две зелёные стрелки по кругу, нарисованы по пикселям (верхняя половина;
 # нижняя — та же, повёрнутая на 180°)
 REFRESH16_TOP = [
@@ -506,6 +519,7 @@ ICONS = {
     "export_png": picture,
     "report": report,
     "excel": excel,
+    "word": word,
     "refresh": refresh,
     "settings": gear,
     "help": help_,
@@ -646,6 +660,21 @@ def excel32():
     return img
 
 
+def word32():
+    img, d = c32()
+    page32(d, 7, 0, 29, 31)
+    for y in (8, 11, 14, 17, 20, 23, 26):
+        d.line((19, y, 26, y), fill=D)
+    d.line((10, 5, 20, 5), fill=D)
+    bevel_rect(d, (0, 7, 17, 24), N, light=B, shadow=K)
+    w = ["##.....##", "##.....##", "##..#..##", "##.###.##", "##.###.##", ".###.###.", ".##...##.", ".#.....#."]
+    for j, row in enumerate(w):
+        for i, ch in enumerate(row):
+            if ch == "#":
+                d.point((4 + i, 11 + j), fill=W)
+    return img
+
+
 def refresh32():
     c = 16.0
 
@@ -751,6 +780,7 @@ ICONS32 = {
     "export_png": picture32,
     "report": report32,
     "excel": excel32,
+    "word": word32,
     "refresh": refresh32,
     "settings": gear32,
     "help": help32,

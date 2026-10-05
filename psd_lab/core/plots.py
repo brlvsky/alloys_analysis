@@ -232,6 +232,73 @@ POP_COLORS = {"мелкая": "#2a78d6", "крупная": "#eb6834", "сред�
               "субмикронная": "#808080"}
 
 
+def draw_pair(fig, d, *, lang="ru", log_x=True, font_scale=1.0):
+    """Два образца: сверху плотности q3*(ln x) A и B, снизу разность ΔΣQ = ΣQ_B − ΣQ_A, п.п.
+    Возвращает (ax_top, ax_bottom)."""
+    from .deconv import density_ln
+
+    t = TEXT[lang]
+    fs = 12 * font_scale
+    fig.clear()
+    ax1, ax2 = fig.subplots(2, 1, sharex=True, gridspec_kw={"height_ratios": [3, 2]})
+    x_hi = max(x_limit(d.a), x_limit(d.b))
+    x_lo = max(min(d_at(d.a, 0.5), d_at(d.b, 0.5)) / 1.5, float(d.grid[0]))
+    if not log_x:
+        x_lo = 0.0
+    # q3* — на общих логарифмических интервалах (12 на декаду): у мелкой сетки прибора (шаг 1–2 мкм)
+    # плотность по ln x на крупных размерах «шумит» от округления ΣQ, а так оба образца в одних интервалах
+    for s, col, fill, lab in ((d.a, "black", "#c8c8c8", "A"), (d.b, "#2a78d6", None, "B")):
+        mid, q = log_density(s, max(x_lo, float(d.grid[0])), x_hi)
+        if fill:
+            ax1.fill_between(mid, q, step="mid", color=fill, linewidth=0)
+        ax1.step(mid, q, where="mid", color=col, linewidth=1.5 if lab == "B" else 1.0,
+                 label=f"{lab}: {s.label}")
+    ax1.set_ylim(bottom=0)
+    ax1.legend(loc="upper left", fontsize=9 * font_scale, frameon=True, edgecolor="black", fancybox=False)
+    _style_ax(ax1, fs)
+    ax1.tick_params(labelbottom=False)
+
+    delta = d.delta
+    ax2.axhline(0, color="black", linewidth=0.8)
+    ax2.fill_between(d.grid, delta, 0, where=delta >= 0, color="#2a78d6", alpha=0.35, linewidth=0,
+                     interpolate=True)
+    ax2.fill_between(d.grid, delta, 0, where=delta < 0, color="#eb6834", alpha=0.35, linewidth=0,
+                     interpolate=True)
+    ax2.plot(d.grid, delta, color="black", linewidth=1.3, label="ΔΣQ = ΣQ(B) − ΣQ(A)")
+    from .metrics import REPEAT_TOL
+
+    for yv in (-REPEAT_TOL, REPEAT_TOL):   # полоса разброса повторов
+        ax2.axhline(yv, color="#808080", linewidth=0.8, linestyle=":")
+    lim = max(5.0, float(np.nanmax(np.abs(delta))) * 1.15)
+    ax2.set_ylim(-lim, lim)
+    ax2.set_ylabel("ΔΣQ, п.п.", fontstyle="italic", fontsize=fs)
+    ax2.set_xlabel(t["x"], fontstyle="italic", fontsize=fs)
+    ax2.text(0.995, 0.97, "B мельче ↑", transform=ax2.transAxes, ha="right", va="top", fontsize=8.5 * font_scale,
+             color="#1a5fb0")
+    ax2.text(0.995, 0.03, "B крупнее ↓", transform=ax2.transAxes, ha="right", va="bottom",
+             fontsize=8.5 * font_scale, color="#b04a1a")
+    _style_ax(ax2, fs)
+    if log_x:
+        ax1.set_xscale("log")
+        ax1.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}"))
+    ax1.set_xlim(x_lo, x_hi)
+    ax1.set_ylabel("q3*, % (на ln x)", fontstyle="italic", fontsize=fs)
+    fig.tight_layout()
+    return ax1, ax2
+
+
+def log_density(s: Sample, x_lo: float, x_hi: float, per_decade: int = 12):
+    """q3*(ln x) = ΔΣQ/Δln x на логарифмических интервалах; возвращает (середины, q)."""
+    from .metrics import cum_at
+
+    x_lo = max(x_lo, 1e-3)
+    n = max(4, int(np.ceil(np.log10(x_hi / x_lo) * per_decade)))
+    edges = np.exp(np.linspace(np.log(x_lo), np.log(x_hi), n + 1))
+    c = np.array([cum_at(s, x) for x in edges])
+    q = np.diff(c) / np.diff(np.log(edges))
+    return np.sqrt(edges[:-1] * edges[1:]), q
+
+
 def _style_ax(ax, fs):
     ax.grid(True, linestyle="--", color=GRID_COLOR, linewidth=0.6)
     ax.set_axisbelow(True)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 import queue
 import sys
 import threading
@@ -17,8 +18,10 @@ from .. import APP_NAME, __version__
 from ..core import expand_paths, file_sha1, load
 from ..core.metrics import average_repeats, compute
 from ..core.model import LEVEL_NAMES, LEVEL_ORDER, Sample
-from ..core.plots import common_axes, draw_compare, draw_sample, plot_all, plot_compare, plot_sample, safe_filename
-from ..core.report import write_html, write_xlsx
+from ..core import compare2
+from ..core.plots import (common_axes, draw_compare, draw_pair, draw_sample, new_figure, plot_all, plot_compare,
+                          plot_sample, safe_filename)
+from ..core.report import write_docx, write_html, write_xlsx
 from ..core.settings import Settings, app_base_dir, data_dir, resource_dir
 from . import hover, theme
 from .dialogs.about import AboutDialog, Splash
@@ -34,12 +37,23 @@ from .tabs.placeholder import PlaceholderTab
 from .tabs.plot_panel import PlotPanel
 from .tabs.summary import SummaryTab
 from .tabs.welcome import WelcomePanel
-from .widgets import PanelTitle, ReadoutBar, StatusBar, Toolbar, scrolled, sunken
+from .widgets import NoteBox, PanelTitle, ReadoutBar, StatusBar, Table, Toolbar, Tooltip, groupbox, scrolled, sunken
 
 FLAG_ICON = {"ERROR": "flag_error", "WARN": "flag_warn", "INFO": "flag_info", None: "blank"}
 TAB_ICONS = {"Распределение": "tab_dist", "Сравнение": "tab_cmp", "Сводка": "tab_sum", "Популяции": "tab_pop",
              "Технология": "tab_tech", "Поверхность": "tab_surf", "Упаковка": "tab_pack", "Кинетика": "tab_kin",
              "База данных": "tab_db", "Методика": "tab_method"}
+def open_file(path: Path):
+    """Открыть файл программой по умолчанию (Word, браузер, Excel)."""
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(path))  # noqa: S606
+        else:
+            webbrowser.open(Path(path).resolve().as_uri())
+    except OSError:
+        webbrowser.open(Path(path).resolve().as_uri())
+
+
 TABS = ["Распределение", "Сравнение", "Сводка", "Популяции", "Технология", "Поверхность", "Упаковка",
         "Кинетика", "База данных", "Методика"]
 
@@ -114,6 +128,7 @@ class MainWindow:
         ex.add_command(label="PNG всех графиков…", underline=4, command=self.export_png_all)
         ex.add_command(label="Сводка в Excel (summary.xlsx)…", underline=0, command=self.export_xlsx)
         ex.add_command(label="Отчёт HTML (report.html)…", underline=0, command=self.export_html)
+        ex.add_command(label="Отчёт Word (report.docx)…", underline=6, command=self.export_docx)
         ex.add_separator()
         ex.add_command(label="Всё в папку…", underline=0, command=self.export_all)
         m.add_cascade(label="Экспорт", underline=0, menu=ex)
@@ -196,6 +211,7 @@ class MainWindow:
         tb.separator()
         tb.button(ic("export_png"), self.export_png_current, "Сохранить текущий график в PNG", text=lab("PNG"))
         tb.button(ic("report"), self.export_html, "Отчёт HTML для руководителя", text=lab("Отчёт"))
+        tb.button(ic("word"), self.export_docx, "Отчёт в Word (можно править и сохранить в PDF)", text=lab("Word"))
         tb.button(ic("excel"), self.export_xlsx, "Сводка в Excel", text=lab("Excel"))
         tb.separator()
         tb.button(ic("refresh"), self.reload, "Перечитать файлы (F5)", text=lab("Обновить"))
@@ -269,15 +285,18 @@ class MainWindow:
         self.dist = PlotPanel(dist_tab, "Распределение", on_save=self.export_png_current)
         self.readouts = ReadoutBar(self.dist, "Результаты (размеры — мкм, доли — % объёма)")
         self.readouts.pack(fill="x", side="bottom", before=self.dist.plot_frame)
-        self.cmp = PlotPanel(self.nb, "Сравнение накопленных кривых", on_save=self.export_png_current,
+        self.cmp_tab = tk.Frame(self.nb, background=theme.FACE)
+        self.cmp = PlotPanel(self.cmp_tab, "Сравнение накопленных кривых", on_save=self.export_png_current,
                              extra=self._compare_toolbar)
+        self.cmp.pack(fill="both", expand=True)
+        self._build_pair_controls()
         self.summary = SummaryTab(self.nb, on_select=self.on_summary_select,
                                   icon=lambda lv: theme.load_icon(self.root, FLAG_ICON[lv]))
         self.mod_tabs = {"Популяции": PopulationsTab(self.nb, self), "Технология": TechTab(self.nb, self),
                          "Поверхность": SurfaceTab(self.nb, self), "Упаковка": PackingTab(self.nb, self),
                          "Кинетика": KineticsTab(self.nb, self), "База данных": DatabaseTab(self.nb, self),
                          "Методика": MethodTab(self.nb, self)}
-        tabs = {"Распределение": dist_tab, "Сравнение": self.cmp, "Сводка": self.summary, **self.mod_tabs}
+        tabs = {"Распределение": dist_tab, "Сравнение": self.cmp_tab, "Сводка": self.summary, **self.mod_tabs}
         for name in TABS:
             w = tabs.get(name) or PlaceholderTab(self.nb, name)
             self.nb.add(w, text=f" {name}  ", image=theme.load_icon(self.root, TAB_ICONS[name]), compound="left",
@@ -290,6 +309,77 @@ class MainWindow:
     def _compare_toolbar(self, tb):
         tk.Checkbutton(tb, text="Логарифмическая ось X", variable=self.v_logx, command=self.on_view_option,
                        background=theme.FACE, activebackground=theme.FACE).pack(side="left", padx=theme.px(4))
+
+    def _build_pair_controls(self):
+        """Вторая строка панели сравнения: все отмеченные образцы или два образца «до и после»."""
+        row = Toolbar(self.cmp, grip=False)
+        row.pack(fill="x", after=self.cmp.toolbar)
+        self.v_cmp_mode = tk.StringVar(value=self.st.compare_mode)
+        tk.Label(row, text="Показать:").pack(side="left", padx=(theme.px(6), theme.px(4)))
+        for val, text in (("all", "все отмеченные образцы"), ("pair", "два образца «до и после»:  A")):
+            tk.Radiobutton(row, text=text, value=val, variable=self.v_cmp_mode, command=self.on_cmp_mode,
+                           background=theme.FACE, activebackground=theme.FACE).pack(side="left",
+                                                                                      padx=(0, theme.px(6)))
+        self.cb_a = ttk.Combobox(row, state="readonly", width=22, font=theme.FONTS["ui"])
+        self.cb_a.pack(side="left", pady=theme.px(2))
+        tk.Label(row, text="→  B").pack(side="left", padx=theme.px(6))
+        self.cb_b = ttk.Combobox(row, state="readonly", width=22, font=theme.FONTS["ui"])
+        self.cb_b.pack(side="left", pady=theme.px(2))
+        for cb in (self.cb_a, self.cb_b):
+            cb.bind("<<ComboboxSelected>>", lambda e: self.on_pair_change())
+        self.b_swap = ttk.Button(row, text="Поменять A и B", command=self.swap_pair)
+        self.b_swap.pack(side="left", padx=theme.px(6), pady=theme.px(2))
+        Tooltip(self.b_swap, "A — «до» (база), B — «после» (сравниваемый образец)")
+
+        # панель с разницей метрик — видна только в режиме «два образца»
+        self.pair_panel = tk.Frame(self.cmp, background=theme.FACE)
+        g = groupbox(self.pair_panel, "Разница B − A (размеры — мкм, доли — п.п.)")
+        g.pack(side="left", fill="both", padx=(theme.px(2), theme.px(4)), pady=(0, theme.px(2)))
+        self.pair_table = Table(g, [("Показатель", 13, "w"), ("A", 8, "e"), ("B", 8, "e"), ("B − A", 8, "e"),
+                                    ("Изменение, %", 8, "e")], height=6)
+        self.pair_table.pack(fill="both", expand=True)
+        notes = tk.Frame(self.pair_panel, background=theme.FACE)
+        notes.pack(side="left", fill="both", expand=True, padx=(0, theme.px(2)), pady=(theme.px(6), theme.px(2)))
+        self.pair_note = NoteBox(notes, title="Итог:")
+        self.pair_note.pack(fill="x")
+        self.pair_warn = NoteBox(notes, title="Внимание:")
+        self.pair_assume = NoteBox(notes, compare2.ASSUMPTIONS)
+        self.pair_assume.pack(fill="x", pady=(theme.px(4), 0))
+        self._sync_pair_widgets()
+
+    def _sync_pair_widgets(self):
+        on = self.v_cmp_mode.get() == "pair"
+        for w in (self.cb_a, self.cb_b):
+            w.configure(state="readonly" if on else "disabled")
+        self.b_swap.configure(state="normal" if on else "disabled")
+
+    def on_cmp_mode(self):
+        self.st.compare_mode = self.v_cmp_mode.get()
+        self._sync_pair_widgets()
+        self.refresh_cmp()
+
+    def on_pair_change(self):
+        self.st.compare_pair = [self.cb_a.get(), self.cb_b.get()]
+        self.refresh_cmp()
+
+    def swap_pair(self):
+        a, b = self.cb_a.get(), self.cb_b.get()
+        self.cb_a.set(b)
+        self.cb_b.set(a)
+        self.on_pair_change()
+
+    def pair_samples(self):
+        """(A, B) для режима «до и после» из сохранённого выбора, иначе первые два образца."""
+        by = {s.label: s for s in self.all_samples()}
+        labels = list(by)
+        if len(labels) < 2:
+            return None, None
+        a, b = (list(self.st.compare_pair) + [None, None])[:2]
+        if a not in by:
+            a = labels[0]
+        if b not in by or b == a:
+            b = next(x for x in labels if x != a)
+        return by[a], by[b]
 
     def _build_log(self):
         self.log_frame = tk.Frame(self.root, background=theme.FACE)
@@ -893,6 +983,13 @@ class MainWindow:
         self.readouts.set_values(vals, colors)
 
     def refresh_cmp(self):
+        labels = [s.label for s in self.all_samples()]
+        for cb in (self.cb_a, self.cb_b):
+            cb.configure(values=labels)
+        if self.v_cmp_mode.get() == "pair":
+            self._refresh_pair()
+            return
+        self.pair_panel.pack_forget()
         groups = self.enabled_groups()
         if not groups:
             self._empty_cmp("Откройте файлы: Файл → Открыть файлы… (Ctrl+O)" if not self.groups else
@@ -903,6 +1000,28 @@ class MainWindow:
         self.cmp.set_hover(hover.compare(ax))
         n = sum(len(g) for g in groups)
         self.cmp.set_title(f"Сравнение накопленных кривых — образцов: {n}")
+        self.cmp.draw()
+
+    def _refresh_pair(self):
+        a, b = self.pair_samples()
+        if a is None:
+            self.pair_panel.pack_forget()
+            self._empty_cmp("Для сравнения «до и после» нужны хотя бы два образца")
+            return
+        self.cb_a.set(a.label)
+        self.cb_b.set(b.label)
+        d = compare2.compare(a, b, self.st.windows_tuples)
+        ax1, ax2 = draw_pair(self.cmp.figure, d, lang=self.st.lang, log_x=self.st.compare_log, font_scale=0.9)
+        self.cmp.set_hover(hover.pair(ax1, ax2, d))
+        self.cmp.set_title(f"До и после: A — {a.label}, B — {b.label}")
+        self.pair_table.fill(compare2.table_rows(d))
+        self.pair_note.set(compare2.summary_text(d))
+        if d.warnings:
+            self.pair_warn.set("; ".join(d.warnings) + ".")
+            self.pair_warn.pack(fill="x", pady=(theme.px(4), 0), before=self.pair_assume)
+        else:
+            self.pair_warn.pack_forget()
+        self.pair_panel.pack(side="bottom", fill="x", before=self.cmp.plot_frame)
         self.cmp.draw()
 
     def on_view_option(self):
@@ -942,8 +1061,18 @@ class MainWindow:
         if on_cmp:
             if not self._need_data():
                 return
-            p = self._ask_save("Сохранить сравнение", "compare.png", ".png", [("PNG", "*.png")])
-            if p:
+            pair = self.v_cmp_mode.get() == "pair"
+            p = self._ask_save("Сохранить сравнение", "compare_pair.png" if pair else "compare.png", ".png",
+                               [("PNG", "*.png")])
+            if p and pair:
+                a, b = self.pair_samples()
+                if a is not None:
+                    fig = new_figure()
+                    draw_pair(fig, compare2.compare(a, b, self.st.windows_tuples), lang=self.st.lang,
+                              log_x=self.st.compare_log)
+                    fig.savefig(p, facecolor="white")
+                    self.log(f"Сохранён {p}")
+            elif p:
                 plot_compare(self.enabled_groups(), p, lang=self.st.lang, log_x=self.st.compare_log, xmax=self.st.xmax)
                 self.log(f"Сохранён {p}")
             return
@@ -989,27 +1118,43 @@ class MainWindow:
             self.log(f"Сохранена сводка {path}")
             self.update_status("Сводка сохранена")
 
+    def _report_kwargs(self) -> dict:
+        en = self.enabled_samples()
+        return dict(windows=self.st.windows_tuples, lang=self.st.lang, bin_um=self.st.bin_um, xmax=self.st.xmax,
+                    independent_axes=self.st.independent_axes, show_name=self.st.show_name,
+                    log_x=self.st.compare_log, files=[g.path for g in self.groups], st=self.st,
+                    batches=self.batches_for(en), qc=self.qc_labels(en))
+
+    def _write_report(self, writer, path: Path, what: str, opener: str, ask_open: bool):
+        self.busy(True)
+        try:
+            writer(self.enabled_samples(), path, **self._report_kwargs())
+        except PermissionError:
+            messagebox.showerror(APP_NAME, f"Не удалось записать {path.name}.\nВозможно, файл открыт в {opener} — "
+                                 "закройте его и повторите.", parent=self.root)
+            return
+        finally:
+            self.busy(False)
+        self.log(f"Сохранён {what} {path}")
+        self.update_status(f"{what[0].upper()}{what[1:]} сохранён")
+        if ask_open and messagebox.askyesno(APP_NAME, f"{what[0].upper()}{what[1:]} сохранён. Открыть его?",
+                                            parent=self.root):
+            open_file(path)
+
     def export_html(self, path: Path | None = None, ask_open=True):
         if not self._need_data():
             return
         path = path or self._ask_save("Отчёт HTML", "report.html", ".html", [("HTML", "*.html")])
-        if not path:
+        if path:
+            self._write_report(write_html, path, "отчёт", "браузере", ask_open)
+
+    def export_docx(self, path: Path | None = None, ask_open=True):
+        """Отчёт в Word: те же разделы, что в HTML; в Word его можно поправить и сохранить в PDF."""
+        if not self._need_data():
             return
-        self.root.configure(cursor="watch")
-        self.root.update_idletasks()
-        try:
-            write_html(self.enabled_samples(), path, windows=self.st.windows_tuples, lang=self.st.lang,
-                       bin_um=self.st.bin_um, xmax=self.st.xmax, independent_axes=self.st.independent_axes,
-                       show_name=self.st.show_name, log_x=self.st.compare_log,
-                       files=[g.path for g in self.groups], st=self.st,
-                       batches=self.batches_for(self.enabled_samples()),
-                       qc=self.qc_labels(self.enabled_samples()))
-        finally:
-            self.root.configure(cursor="")
-        self.log(f"Сохранён отчёт {path}")
-        self.update_status("Отчёт сохранён")
-        if ask_open and messagebox.askyesno(APP_NAME, "Отчёт сохранён. Открыть его в браузере?", parent=self.root):
-            webbrowser.open(path.resolve().as_uri())
+        path = path or self._ask_save("Отчёт Word", "report.docx", ".docx", [("Документ Word", "*.docx")])
+        if path:
+            self._write_report(write_docx, path, "отчёт Word", "Word", ask_open)
 
     def export_all(self):
         if not self._need_data():
@@ -1019,6 +1164,7 @@ class MainWindow:
             return
         self.export_png_all(out)
         self.export_xlsx(out / "summary.xlsx")
+        self.export_docx(out / "report.docx", ask_open=False)
         self.export_html(out / "report.html")
 
     # ================================================================ прочее
@@ -1230,6 +1376,17 @@ def run_selftest(win: MainWindow, out: Path, splash_shot: Path | None) -> int:
             root.update()
             hover_demo[name]()
             shots.append(grab(root, out / f"{i + 1:02d}h_{safe_filename(name)}_наведение.png"))
+        if name == "Сравнение":   # режим «до и после»
+            labels = [s.label for s in win.all_samples()]
+            pa = next((x for x in labels if x.startswith("N/C (")), labels[0])
+            pb = next((x for x in labels if x.startswith("П/С +0,5Y2O3")), labels[-1])
+            win.v_cmp_mode.set("pair")
+            win.st.compare_pair = [pa, pb]
+            win.on_cmp_mode()
+            root.update()
+            shots.append(grab(root, out / f"{i + 1:02d}b_{safe_filename(name)}_до_и_после.png"))
+            win.v_cmp_mode.set("all")
+            win.on_cmp_mode()
         inner = getattr(win.mod_tabs.get(name), "nb", None)
         if inner is not None:   # вложенные вкладки модуля
             for j in range(1, len(inner.tabs())):
@@ -1253,8 +1410,20 @@ def run_selftest(win: MainWindow, out: Path, splash_shot: Path | None) -> int:
         d.destroy()
     for p in shots:
         say(f"SELFTEST: скриншот {p}")
-    ok = n > 0
-    say("SELFTEST: OK" if ok else "SELFTEST: ОШИБКА — нет образцов")
+    # отчёты: в собранной программе это проверяет, что в сборку попали шаблоны Word и т. п.
+    reports_ok = True
+    for name, fn in (("report.html", win.export_html), ("report.docx", win.export_docx),
+                     ("summary.xlsx", win.export_xlsx)):
+        try:
+            fn(out / name, **({} if name.endswith(".xlsx") else {"ask_open": False}))
+            size = (out / name).stat().st_size
+            say(f"SELFTEST: {name} — {size // 1024} КБ")
+            reports_ok &= size > 10_000
+        except Exception as e:  # noqa: BLE001
+            say(f"SELFTEST: ОШИБКА {name}: {e!r}\n{traceback.format_exc(limit=-4)}")
+            reports_ok = False
+    ok = n > 0 and reports_ok
+    say("SELFTEST: OK" if ok else "SELFTEST: ОШИБКА — нет образцов или не создан отчёт")
     return 0 if ok else 1
 
 

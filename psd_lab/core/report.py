@@ -1,13 +1,10 @@
-"""Отчёты: summary.xlsx (Сводка / Кривые / Флаги) и самодостаточный report.html.
+"""Отчёты: summary.xlsx (Сводка / Кривые / Флаги), самодостаточный report.html и report.docx (Word).
 
 Плюс пакетный режим: обработать папку целиком без GUI.
 """
 from __future__ import annotations
 
-import base64
 import datetime as dt
-import html
-import io
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -145,49 +142,27 @@ def _xl(v):
     return v
 
 
-# ---------------------------------------------------------------- HTML
-def _fig_b64(fig, dpi=110) -> str:
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=dpi, facecolor="white")
-    return base64.b64encode(buf.getvalue()).decode("ascii")
-
-
+# ---------------------------------------------------------------- отчёт (HTML и Word)
 def _fmt(v, nd=2) -> str:
     if v is None:
         return "—"
     if isinstance(v, (float, np.floating)):
         return "—" if not np.isfinite(v) else f"{v:.{nd}f}".replace(".", ",")
-    return html.escape(str(v))
+    return str(v)
 
 
-LEVEL_CSS = {"ERROR": "err", "WARN": "warn", "INFO": "info"}
-
-CSS = """
-body{font-family:Tahoma,Verdana,Arial,sans-serif;font-size:14px;color:#000;background:#fff;
-     max-width:1100px;margin:0 auto;padding:16px;line-height:1.45}
-h1{font-size:22px;background:#000080;color:#fff;padding:6px 10px;margin:0 0 4px}
-h2{font-size:17px;border-bottom:2px solid #000080;padding-bottom:2px;margin-top:28px}
-h3{font-size:15px;margin:18px 0 4px}
-.meta{color:#444;font-size:13px}
-table{border-collapse:collapse;font-size:12.5px;margin:6px 0}
-th,td{border:1px solid #808080;padding:3px 6px;vertical-align:top}
-th{background:#c0c0c0;text-align:center}
-td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-.scroll{overflow-x:auto}
-.badge{display:inline-block;min-width:76px;text-align:center;font-weight:bold;padding:0 4px;
-       border:1px solid #000;margin-right:6px}
-.err{background:#ff0000;color:#fff}.warn{background:#ffff00;color:#000}.info{background:#0000ff;color:#fff}
-img{max-width:100%;border:1px solid #808080}
-.card{margin:14px 0 24px}
-.note{background:#ffffe1;border:1px solid #000;padding:6px 10px;font-size:13px}
-ul.flags{list-style:none;padding-left:0}
-ul.flags li{margin:3px 0}
-"""
+LEGEND = ("ΣQ — накопленная объёмная доля частиц мельче данного размера, %; Q — доля объёма в интервале, %. "
+          "d10, d50, d90 — размеры, мельче которых 10, 50 и 90 % объёма порошка; span = (d90 − d10)/d50 — ширина "
+          "распределения. D[4,3] — средний по объёму диаметр, D[3,2] — средний по поверхности (Заутера). Доли по "
+          "окнам — объёмный процент частиц в диапазоне размеров. Кривые не обрезаются и не перенормируются: если "
+          "кривая не доходит до 100 %, это показано флагом. Повторные измерения с одинаковым названием усреднены.")
 
 
-def write_html(samples: list[Sample], path: Path, *, windows, lang="en", bin_um=None, xmax=None,
-               independent_axes=False, show_name=True, log_x=True, files=None, skipped=None, st=None,
-               batches=None, qc=None) -> Path:
+def build_blocks(samples: list[Sample], *, windows, lang="en", bin_um=None, xmax=None, independent_axes=False,
+                 show_name=True, log_x=True, files=None, skipped=None, st=None, batches=None, qc=None) -> list:
+    """Содержание отчёта — список блоков (report_doc). Из него делаются и HTML, и Word."""
+    from .report_doc import Bullets, Flags, Heading, Image, Note, Para, Table, fig_png
+
     files = files or sorted({s.file for s in samples})
     now = dt.datetime.now().strftime("%d.%m.%Y %H:%M")
     cols = summary_columns(windows, with_qc=qc is not None)
@@ -199,89 +174,102 @@ def write_html(samples: list[Sample], path: Path, *, windows, lang="en", bin_um=
     decimals[9 + nw] = 0   # обскурация
     decimals[10 + nw] = 3  # Error
 
-    h = [f"<!doctype html><html lang='ru'><head><meta charset='utf-8'>"
-         f"<meta name='viewport' content='width=device-width,initial-scale=1'>"
-         f"<title>Отчёт по гранулометрии</title><style>{CSS}</style></head><body>"]
-    h.append("<h1>Гранулометрический состав порошков</h1>")
-    h.append(f"<p class='meta'>Проект: «{html.escape(PROJECT)}». Сформировано {now} программой "
-             f"{APP_NAME} {__version__}. Образцов: {len(samples)}.</p>")
-    h.append("<p class='meta'>Файлы: " + ", ".join(html.escape(Path(f).name) for f in files) + "</p>")
+    b = [Heading("Гранулометрический состав порошков", 1),
+         Para(f"Проект: «{PROJECT}». Сформировано {now} программой {APP_NAME} {__version__}. "
+              f"Образцов: {len(samples)}.", meta=True),
+         Para("Файлы: " + ", ".join(Path(f).name for f in files), meta=True)]
 
     # Сводка
-    h.append("<h2>1. Сводная таблица</h2><div class='scroll'><table><tr>")
-    h += [f"<th>{html.escape(c)}</th>" for c in cols]
-    h.append("</tr>")
-    for r in rows:
-        h.append("<tr>" + "".join(
-            f"<td class='n'>{_fmt(v, decimals[i])}</td>" if i in num_cols
-            else f"<td>{_fmt(v)}</td>" for i, v in enumerate(r)) + "</tr>")
-    h.append("</table></div>")
-    h.append("<p class='note'><b>Обозначения.</b> ΣQ — накопленная объёмная доля частиц мельче данного "
-             "размера, %; Q — доля объёма в интервале, %. d10, d50, d90 — размеры, мельче которых 10, 50 и "
-             "90 % объёма порошка; span = (d90 − d10)/d50 — ширина распределения. D[4,3] — средний по объёму "
-             "диаметр, D[3,2] — средний по поверхности (Заутера). Доли по окнам — объёмный процент частиц в "
-             "диапазоне размеров. Кривые не обрезаются и не перенормируются: если кривая не доходит до 100 %, "
-             "это показано флагом. Повторные измерения с одинаковым названием усреднены.</p>")
+    b.append(Heading("1. Сводная таблица"))
+    b.append(Table(cols, [[_fmt(v, decimals[i]) if i in num_cols else _fmt(v) for i, v in enumerate(r)]
+                          for r in rows], num_cols=num_cols, wide=True))
+    b.append(Note("Обозначения.", LEGEND))
 
     # Флаги
-    h.append("<h2>2. Качество измерений</h2>")
-    flagged = [s for s in samples if s.flags]
-    if not flagged:
-        h.append("<p>Замечаний нет.</p>")
+    b.append(Heading("2. Качество измерений"))
+    if not any(s.flags for s in samples):
+        b.append(Para("Замечаний нет."))
     else:
-        h.append("<ul class='flags'>")
-        for (lv, text), labels in grouped_flags(samples):
-            css = LEVEL_CSS.get(lv, "info")
-            h.append(f"<li><span class='badge {css}'>{LEVEL_NAMES.get(lv, lv)}</span>"
-                     f"<b>{html.escape(', '.join(labels))}</b>: {html.escape(text)}</li>")
-        h.append("</ul>")
-        h.append("<p class='note'>ОШИБКА — результату доверять нельзя, измерение нужно повторить. "
-                 "ВНИМАНИЕ — результат возможен, но с оговоркой. ИНФО — к сведению при сравнении образцов. "
-                 "Поле Error прибора показано в таблице без оценки (единицы в экспорте не указаны).</p>")
+        b.append(Flags([(lv, ", ".join(labels), text) for (lv, text), labels in grouped_flags(samples)],
+                       level_names=LEVEL_NAMES))
+        b.append(Note("Уровни:", "ОШИБКА — результату доверять нельзя, измерение нужно повторить. ВНИМАНИЕ — результат "
+                      "возможен, но с оговоркой. ИНФО — к сведению при сравнении образцов. Поле Error прибора "
+                      "показано в таблице без оценки (единицы в экспорте не указаны)."))
 
     # Сравнение
     groups = _groups(samples)
     fig = new_figure()
     draw_compare(fig, groups, lang=lang, log_x=log_x, xmax=xmax)
-    h.append("<h2>3. Сравнение накопленных кривых</h2>")
-    h.append(f"<img alt='Сравнение' src='data:image/png;base64,{_fig_b64(fig)}'>")
+    b.append(Heading("3. Сравнение накопленных кривых"))
+    b.append(Image(fig_png(fig), alt="Сравнение"))
+    pair = report_pair(samples, st)
+    if pair is not None:
+        from . import compare2
+        from .plots import draw_pair
+
+        d = compare2.compare(*pair, windows)
+        b.append(Heading(f"До и после: A — {d.a.label}, B — {d.b.label}", 3))
+        draw_pair(fig, d, lang=lang, log_x=log_x)
+        b.append(Image(fig_png(fig), alt="До и после"))
+        b.append(Table(["Показатель", "A", "B", "B − A", "Изменение, %"], compare2.table_rows(d)))
+        b.append(Note("Итог:", compare2.summary_text(d)))
+        for w in d.warnings:
+            b.append(Note("Внимание:", w + "."))
+        b.append(Note("Допущения:", compare2.ASSUMPTIONS))
 
     # По образцам
-    h.append("<h2>4. Распределения по образцам</h2>")
+    b.append(Heading("4. Распределения по образцам"))
     for grp in groups:
         shared = (None, None) if independent_axes else common_axes(grp, bin_um, xmax)
-        h.append(f"<h3>Файл {html.escape(Path(grp[0].file).name)}</h3>")
+        b.append(Heading(f"Файл {Path(grp[0].file).name}", 3))
         for s in grp:
             draw_sample(fig, s, lang=lang, bin_um=bin_um, xmax=xmax or shared[0], ymax=shared[1],
                         show_name=show_name)
             m = compute(s, windows)
-            h.append("<div class='card'>")
-            h.append(f"<b>{html.escape(s.label)}</b> — d10 {_fmt(m['d10'])}, d50 {_fmt(m['d50'])}, "
-                     f"d90 {_fmt(m['d90'])} мкм; D[4,3] {_fmt(m['d43'])} мкм")
+            text = (f" — d10 {_fmt(m['d10'])}, d50 {_fmt(m['d50'])}, d90 {_fmt(m['d90'])} мкм; "
+                    f"D[4,3] {_fmt(m['d43'])} мкм")
             if s.meta.get("obscuration") is not None:
-                h.append(f"; обскурация {_fmt(s.meta['obscuration'], 0)} %")
-            h.append(f"<br><img alt='{html.escape(s.label)}' src='data:image/png;base64,{_fig_b64(fig)}'>")
-            h.append("</div>")
+                text += f"; обскурация {_fmt(s.meta['obscuration'], 0)} %"
+            b.append(Image(fig_png(fig), alt=s.label, caption=s.label, text=text))
 
+    n = 5
     if st is not None and samples:
-        from .report_modules import html_sections
+        from .report_modules import module_blocks
 
-        h += html_sections(samples, st, fig, _fig_b64, start=5)
+        more, n = module_blocks(samples, st, fig, start=5)
+        b += more
     if batches:
-        from .report_modules import batches_section
+        from .report_modules import batches_blocks
 
-        nxt = next((int(x[len("<!--next:"):-3]) for x in reversed(h) if x.startswith("<!--next:")), 5)
-        h += batches_section(batches, nxt)
+        b += batches_blocks(batches, n)
 
     if skipped:
-        h.append("<h2>Пропущенные файлы</h2><ul>")
-        h += [f"<li>{html.escape(Path(f).name)}: {html.escape(why)}</li>" for f, why in skipped]
-        h.append("</ul>")
-    h.append("</body></html>")
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(h), encoding="utf-8")
-    return path
+        b.append(Heading("Пропущенные файлы"))
+        b.append(Bullets([(Path(f).name, why) for f, why in skipped]))
+    return b
+
+
+def report_pair(samples: list[Sample], st) -> tuple[Sample, Sample] | None:
+    """Пара «до и после» для отчёта — если она выбрана во вкладке «Сравнение» и оба образца в отчёте."""
+    pair = list(getattr(st, "compare_pair", None) or [])
+    by = {s.label: s for s in samples}
+    if len(pair) == 2 and pair[0] in by and pair[1] in by and pair[0] != pair[1]:
+        return by[pair[0]], by[pair[1]]
+    return None
+
+
+def write_html(samples: list[Sample], path: Path, **kw) -> Path:
+    """Самодостаточный report.html (картинки внутри файла)."""
+    from .report_doc import write_html as _write
+
+    return _write(build_blocks(samples, **kw), path)
+
+
+def write_docx(samples: list[Sample], path: Path, **kw) -> Path:
+    """report.docx — тот же отчёт в Word (можно править и сохранить в PDF средствами Word)."""
+    from .report_doc import render_docx
+
+    return render_docx(build_blocks(samples, **kw), path)
 
 
 def _groups(samples: list[Sample]) -> list[list[Sample]]:
@@ -351,5 +339,9 @@ def run_batch(src, out, settings=None, log=print, db_file=None) -> BatchResult:
                                   bin_um=st.bin_um, xmax=st.xmax, independent_axes=st.independent_axes,
                                   show_name=st.show_name, log_x=st.compare_log, files=res.files,
                                   skipped=res.skipped, st=st, batches=batches))
-    log(f"Отчёт: {out / 'report.html'}; таблица: {out / 'summary.xlsx'}")
+    res.outputs.append(write_docx(res.samples, out / "report.docx", windows=st.windows_tuples, lang=st.lang,
+                                  bin_um=st.bin_um, xmax=st.xmax, independent_axes=st.independent_axes,
+                                  show_name=st.show_name, log_x=st.compare_log, files=res.files,
+                                  skipped=res.skipped, st=st, batches=batches))
+    log(f"Отчёт: {out / 'report.html'} и {out / 'report.docx'}; таблица: {out / 'summary.xlsx'}")
     return res

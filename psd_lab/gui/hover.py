@@ -118,6 +118,29 @@ def compare(ax):
     return curves(ax, value_fmt=lambda y: f"ΣQ = {n(y)} %")
 
 
+def pair(ax1, ax2, d):
+    """Два образца: ΣQ обоих и разность в точке курсора (на любой из двух осей)."""
+    from ..core.metrics import cum_at
+
+    def fn(ev):
+        p = data_xy(ax1, ev) if ax1.bbox.contains(ev.x, ev.y) else data_xy(ax2, ev)
+        if p is None:
+            return None
+        x = float(p[0])
+        if x <= 0 or x < d.grid[0] or x > d.grid[-1]:
+            return None
+        ca, cb = cum_at(d.a, x), cum_at(d.b, x)
+        dv = cb - ca
+        sign = "+" if dv > 0 else ""
+        rows = [("#c8c8c8", f"A: {d.a.label}: ΣQ = {n(ca)} %"),
+                ("#2a78d6", f"B: {d.b.label}: ΣQ = {n(cb)} %"),
+                ("#000000", f"ΔΣQ = {sign}{n(dv)} п.п." + (" (B мельче)" if dv > 0.05 else
+                                                         " (B крупнее)" if dv < -0.05 else ""))]
+        return HoverInfo(f"Размер {size_fmt(x)} мкм", rows, vlines=[(ax1, x), (ax2, x)],
+                         points=[(ax2, x, dv, "#ffff00")])
+    return fn
+
+
 def populations(ax, s):
     """q3*: измеренная плотность + популяции + модель."""
     from ..core.deconv import density_ln

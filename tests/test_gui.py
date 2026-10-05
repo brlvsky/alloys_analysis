@@ -85,9 +85,11 @@ def test_average_toggle_and_rename(win):
 def test_exports(win, tmp_path):
     win.export_xlsx(tmp_path / "Сводка.xlsx")
     win.export_html(tmp_path / "отчёт.html", ask_open=False)
+    win.export_docx(tmp_path / "отчёт.docx", ask_open=False)
     win.export_png_all(tmp_path / "png")
     assert (tmp_path / "Сводка.xlsx").exists()
     assert "TANMB исходный" in (tmp_path / "отчёт.html").read_text(encoding="utf-8")
+    assert (tmp_path / "отчёт.docx").stat().st_size > 100_000
     assert len(list((tmp_path / "png").rglob("*.png"))) == 13
 
 
@@ -244,3 +246,33 @@ def test_pan_freezes_layout(win):
     finally:
         p.pan()
         p.home()
+
+
+def test_compare_pair(win):
+    """Сравнение «до и после»: два образца, разность кривых, таблица разницы, сохранение выбора."""
+    if not win.all_samples():
+        win.load_paths([RAW])
+    win.nb.select(1)
+    win.v_cmp_mode.set("pair")
+    win.on_cmp_mode()
+    win.root.update()
+    labels = [s.label for s in win.all_samples()]
+    a = next(x for x in labels if x.startswith("N/C (") or x.startswith("TANMB исходный"))
+    b = next(x for x in labels if x.startswith("N/C+Y2O3"))
+    win.cb_a.set(a)
+    win.cb_b.set(b)
+    win.on_pair_change()
+    assert win.st.compare_pair == [a, b]
+    assert win.pair_panel.winfo_manager() == "pack"
+    rows = [win.pair_table.tree.item(i, "values") for i in win.pair_table.tree.get_children()]
+    d50 = next(r for r in rows if r[0].startswith("d50"))
+    assert d50[1] == "19,64" and d50[2] == "15,67" and d50[3] == "−3,97"
+    assert "наибольшее расхождение" in win.pair_note.label.cget("text")
+    ax1, ax2 = win.cmp.figure.axes[:2]
+    info = win.cmp.hover_at(ax2, 20, 0)
+    assert info is not None and "ΔΣQ" in info.rows[-1][1]
+    win.swap_pair()
+    assert win.st.compare_pair == [b, a]
+    win.v_cmp_mode.set("all")
+    win.on_cmp_mode()
+    assert win.pair_panel.winfo_manager() == ""
