@@ -284,8 +284,14 @@ def test_drag_and_drop(win, tmp_path):
 
     from psd_lab.gui import dnd
 
-    win.root.update()
+    import time
+
+    t0 = time.time()
+    while not win.dnd and time.time() - t0 < 2:   # подключается через after(50) после старта окна
+        win.root.update()
+        time.sleep(0.02)
     assert win.dnd, "расширение tkdnd не загрузилось"
+    assert dnd.enable.failed == [], "не все виджеты (в т.ч. главное окно) приняли перетаскивание"
     src = tmp_path / "папка с пробелом" / "Расчет копия.xlsx"
     src.parent.mkdir()
     shutil.copy2(RAW / "Расчет.xlsx", src)

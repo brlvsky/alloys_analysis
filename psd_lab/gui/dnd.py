@@ -21,6 +21,12 @@ def enable(root, widgets, on_paths, on_hover=None, log=print) -> bool:
         log(f"Перетаскивание файлов недоступно ({type(e).__name__}: {e}); открывайте файлы через меню.")
         return False
 
+    import tkinter as tk
+
+    if isinstance(root, tk.Tk) and not isinstance(root, TkinterDnD.DnDWrapper):
+        # методы tkdnd tkinterdnd2 добавляет только обычным виджетам (BaseWidget), а главному окну —
+        # лишь через свой класс Tk; подмешиваем его к уже созданному окну
+        root.__class__ = type("DnDTk", (root.__class__, TkinterDnD.DnDWrapper), {})
     reg = TkinterDnD.DnDWrapper.drop_target_register
     bind = TkinterDnD.DnDWrapper.dnd_bind
 
@@ -42,7 +48,7 @@ def enable(root, widgets, on_paths, on_hover=None, log=print) -> bool:
             on_hover(False)
         return event.action
 
-    n = 0
+    n, failed = 0, []
     for w in widgets:
         try:
             reg(w, DND_FILES)
@@ -51,7 +57,9 @@ def enable(root, widgets, on_paths, on_hover=None, log=print) -> bool:
             bind(w, "<<DropLeave>>", leave)
             n += 1
         except Exception as e:  # noqa: BLE001
+            failed.append(w)
             log(f"Перетаскивание: не удалось подключить {w}: {e}")
+    enable.failed = failed
     return n > 0
 
 

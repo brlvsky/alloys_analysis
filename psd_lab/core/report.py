@@ -258,6 +258,21 @@ def report_pair(samples: list[Sample], st) -> tuple[Sample, Sample] | None:
     return None
 
 
+def write_reports(samples: list[Sample], html_path: Path | None = None, docx_path: Path | None = None,
+                  **kw) -> list[Path]:
+    """HTML и Word из одного набора блоков (графики рисуются один раз)."""
+    from .report_doc import render_docx
+    from .report_doc import write_html as _write
+
+    blocks = build_blocks(samples, **kw)
+    out = []
+    if html_path:
+        out.append(_write(blocks, html_path))
+    if docx_path:
+        out.append(render_docx(blocks, docx_path))
+    return out
+
+
 def write_html(samples: list[Sample], path: Path, **kw) -> Path:
     """Самодостаточный report.html (картинки внутри файла)."""
     from .report_doc import write_html as _write
@@ -335,13 +350,9 @@ def run_batch(src, out, settings=None, log=print, db_file=None) -> BatchResult:
     log(f"Графики: {len(made)} PNG в {out}")
     log("Модули: популяции, окна печати, выход годного, поверхность…")
     res.outputs.append(write_xlsx(res.samples, out / "summary.xlsx", st.windows_tuples, st=st))
-    res.outputs.append(write_html(res.samples, out / "report.html", windows=st.windows_tuples, lang=st.lang,
-                                  bin_um=st.bin_um, xmax=st.xmax, independent_axes=st.independent_axes,
-                                  show_name=st.show_name, log_x=st.compare_log, files=res.files,
-                                  skipped=res.skipped, st=st, batches=batches))
-    res.outputs.append(write_docx(res.samples, out / "report.docx", windows=st.windows_tuples, lang=st.lang,
-                                  bin_um=st.bin_um, xmax=st.xmax, independent_axes=st.independent_axes,
-                                  show_name=st.show_name, log_x=st.compare_log, files=res.files,
-                                  skipped=res.skipped, st=st, batches=batches))
+    res.outputs += write_reports(res.samples, out / "report.html", out / "report.docx", windows=st.windows_tuples,
+                                 lang=st.lang, bin_um=st.bin_um, xmax=st.xmax, independent_axes=st.independent_axes,
+                                 show_name=st.show_name, log_x=st.compare_log, files=res.files,
+                                 skipped=res.skipped, st=st, batches=batches)
     log(f"Отчёт: {out / 'report.html'} и {out / 'report.docx'}; таблица: {out / 'summary.xlsx'}")
     return res

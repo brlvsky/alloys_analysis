@@ -21,7 +21,7 @@ from ..core.model import LEVEL_NAMES, LEVEL_ORDER, Sample
 from ..core import compare2
 from ..core.plots import (common_axes, draw_compare, draw_pair, draw_sample, new_figure, plot_all, plot_compare,
                           plot_sample, safe_filename)
-from ..core.report import write_docx, write_html, write_xlsx
+from ..core.report import write_docx, write_html, write_reports, write_xlsx
 from ..core.settings import Settings, app_base_dir, data_dir, resource_dir
 from . import hover, theme
 from .dialogs.about import AboutDialog, Splash
@@ -1205,6 +1205,7 @@ class MainWindow:
                     batches=self.batches_for(en), qc=self.qc_labels(en))
 
     def _write_report(self, writer, path: Path, what: str, opener: str, ask_open: bool):
+        self.update_status(f"Готовлю {what}… (до 15 секунд)")
         self.busy(True)
         try:
             writer(self.enabled_samples(), path, **self._report_kwargs())
@@ -1243,8 +1244,10 @@ class MainWindow:
             return
         self.export_png_all(out)
         self.export_xlsx(out / "summary.xlsx")
-        self.export_docx(out / "report.docx", ask_open=False)
-        self.export_html(out / "report.html")
+        both = lambda samples, path, **kw: write_reports(samples, path, out / "report.docx", **kw)  # noqa: E731
+        self._write_report(both, out / "report.html", "отчёт (HTML и Word)", "браузере или Word", ask_open=False)
+        if messagebox.askyesno(APP_NAME, f"Всё сохранено в папку\n{out}\n\nОткрыть папку?", parent=self.root):
+            open_file(out)
 
     # ================================================================ прочее
     def copy(self):
@@ -1380,6 +1383,8 @@ def maximize(root: tk.Tk):
             root.attributes("-zoomed", True)
     except tk.TclError:
         pass
+
+
 def window_bbox(win: tk.Misc):
     """Координаты окна на экране вместе с рамкой и меню."""
     win.update_idletasks()
