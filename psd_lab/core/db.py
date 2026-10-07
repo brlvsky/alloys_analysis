@@ -46,6 +46,9 @@ CREATE TABLE IF NOT EXISTS print_jobs(
     id INTEGER PRIMARY KEY, batch_id INTEGER NOT NULL REFERENCES batches(id) ON DELETE CASCADE,
     process TEXT, machine TEXT, power_W REAL, speed_mm_s REAL, hatch_um REAL, layer_um REAL, strategy TEXT,
     preheat_C REAL, energy_density_J_mm3 REAL, rel_density_pct REAL);
+CREATE TABLE IF NOT EXISTS charge_recipes(
+    id INTEGER PRIMARY KEY, batch_id INTEGER REFERENCES batches(id) ON DELETE CASCADE,
+    name TEXT, recipe_json TEXT NOT NULL, created TEXT, version TEXT);
 CREATE TABLE IF NOT EXISTS mech_tests(
     id INTEGER PRIMARY KEY, print_job_id INTEGER NOT NULL REFERENCES print_jobs(id) ON DELETE CASCADE,
     test_type TEXT, temp_C REAL, uts_MPa REAL, ys_MPa REAL, elong_pct REAL, cycles INTEGER, notes TEXT);
@@ -107,8 +110,21 @@ def connect(path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
+    migrate(conn)
     conn.commit()
     return conn
+
+
+SCHEMA_VERSION = 2   # 1 — версия программы 1.0; 2 — рецепты шихты (1.1)
+
+
+def migrate(conn: sqlite3.Connection) -> int:
+    """Обновление старой базы без потери данных. Новые таблицы создаются самой SCHEMA
+    (CREATE TABLE IF NOT EXISTS); здесь — изменения, которые так не сделать (новые столбцы и т. п.)."""
+    v = conn.execute("PRAGMA user_version").fetchone()[0]
+    if v < SCHEMA_VERSION:
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    return SCHEMA_VERSION
 
 
 def db_path(data_dir: Path) -> Path:
@@ -181,6 +197,35 @@ def restore(conn: sqlite3.Connection, src: Path) -> int:
     conn.executescript(SCHEMA)   # таблицы, появившиеся в новых версиях программы
     conn.commit()
     return n
+
+
+# ==================================================================== рецепты шихты (1.1)
+def charge_save(conn, recipe_json: dict, name: str = "", batch_id: int | None = None) -> int:
+    """Сохранить рецепт шихты в базу (в карточку партии, если указана). Возвращает id записи."""
+    cur = conn.execute("INSERT INTO charge_recipes(batch_id, name, recipe_json, created, version) "
+                       "VALUES(?,?,?,?,?)",
+                       (batch_id, name, json.dumps(recipe_json, ensure_ascii=False),
+                        dt.datetime.now().isoformat(timespec="seconds"), str(recipe_json.get("version", "1.1"))))
+    conn.commit()
+    return cur.lastrowid
+
+
+def charge_list(conn, batch_id: int | None = None) -> list[sqlite3.Row]:
+    if batch_id is None:
+        return list(conn.execute("SELECT * FROM charge_recipes ORDER BY id DESC"))
+    return list(conn.execute("SELECT * FROM charge_recipes WHERE batch_id=? ORDER BY id DESC", (batch_id,)))
+
+
+def charge_get(conn, rid: int) -> dict:
+    row = conn.execute("SELECT recipe_json FROM charge_recipes WHERE id=?", (rid,)).fetchone()
+    if row is None:
+        raise ValueError(f"рецепт шихты №{rid} не найден")
+    return json.loads(row["recipe_json"])
+
+
+def charge_delete(conn, rid: int) -> None:
+    conn.execute("DELETE FROM charge_recipes WHERE id=?", (rid,))
+    conn.commit()
 
 
 # ==================================================================== партии

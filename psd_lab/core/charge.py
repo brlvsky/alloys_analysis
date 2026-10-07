@@ -489,3 +489,98 @@ def fmt_g(v: float) -> str:
 def balance_accuracy(g: float) -> str:
     """Точность весов для бланка навесок."""
     return "0,001 г (аналитические)" if g < 1.0 else "0,01 г"
+
+
+# ==================================================================== рецепт шихты целиком
+@dataclass
+class Recipe:
+    """Всё, что задаёт пользователь на вкладке «Шихта» (и что сохраняется в JSON и в базу)."""
+    alloy: str = ""                               # название сплава / партии
+    composition: str = ""                         # строка состава
+    basis: str = "at"                             # единицы состава: at | wt
+    additives: list = field(default_factory=list) # [Additive]
+    mode: str = "each"                            # each | all | both
+    target_g: float = 1500.0
+    capacity_g: float = 200.0
+    reserve_pct: float = 0.0
+    load_mode: str = "full"                       # full | equal
+    balls_ratio: float | None = None
+    purity: dict = field(default_factory=dict)    # {компонент: чистота, %}
+    ligature_mode: str = "none"                   # none | computed | given
+    pure_components: list = field(default_factory=list)   # что вводится чистым
+    ligature_comp: dict = field(default_factory=dict)     # заданный состав лигатуры, мас.%
+    mass_overrides: dict = field(default_factory=dict)    # переопределённые атомные массы
+    oxygen_warn_wt: float = OXYGEN_WARN_WT
+    notes: str = ""
+
+    def to_json(self) -> dict:
+        d = {k: v for k, v in self.__dict__.items() if k != "additives"}
+        d["additives"] = [{"component": a.component, "amount": a.amount, "unit": a.unit, "mode": a.mode,
+                           "instead_of": a.instead_of} for a in self.additives]
+        d["version"] = "1.1"
+        return d
+
+    @classmethod
+    def from_json(cls, d: dict) -> "Recipe":
+        d = dict(d or {})
+        d.pop("version", None)
+        adds = [Additive(a.get("component", ""), float(a.get("amount") or 0), a.get("unit"),
+                         a.get("mode", "instead"), a.get("instead_of")) for a in d.pop("additives", [])]
+        known = {f for f in cls.__dataclass_fields__ if f != "additives"}
+        unknown = set(d) - known
+        if unknown:
+            raise ChargeError("в файле рецепта незнакомые поля: " + ", ".join(sorted(unknown)))
+        return cls(additives=adds, **d)
+
+
+@dataclass
+class Result:
+    """Результат расчёта рецепта."""
+    recipe: Recipe
+    variants: list                                 # [Variant]; variants[0] — базовый состав
+    plan: LoadPlan
+    warnings: list = field(default_factory=list)   # предупреждения о вводе (округление мас.% и т. п.)
+    ligature: object = None                        # LigatureResult | None
+
+    @property
+    def main(self) -> Variant:
+        """Вариант, по которому считаются навески: последний (с добавками), иначе базовый."""
+        return self.variants[-1]
+
+    def loads(self, variant: Variant | None = None) -> dict:
+        return weigh((variant or self.main).w, self.plan.per_load_g, self.recipe.purity)
+
+    def purchase(self, variant: Variant | None = None) -> dict:
+        return purchase((variant or self.main).w, self.plan, self.recipe.purity)
+
+
+def calculate(recipe: Recipe) -> Result:
+    """Полный расчёт по рецепту: варианты состава, загрузки, лигатура, предупреждения."""
+    m = masses(recipe.mass_overrides)
+    comp = parse_composition(recipe.composition, recipe.basis)
+    warns = rounding_warnings(comp, m)
+    vs = variants(comp, recipe.additives, recipe.mode, recipe.mass_overrides, recipe.oxygen_warn_wt)
+    plan = plan_loads(recipe.target_g, recipe.capacity_g, recipe.reserve_pct, recipe.load_mode,
+                      recipe.balls_ratio)
+    lig = None
+    w = vs[-1].w
+    if recipe.ligature_mode == "computed":
+        lig = ligature_computed(w, set(recipe.pure_components))
+    elif recipe.ligature_mode == "given":
+        lig = ligature_given(w, recipe.ligature_comp, set(recipe.pure_components) or None)
+    for c, p in (recipe.purity or {}).items():
+        if p and p < 100:
+            warns.append(f"{c}: чистота {_n(p)} % — навеска увеличена в {100 / p:.4f} раза; "
+                         f"примеси не учитываются")
+    return Result(recipe, vs, plan, warns, lig)
+
+
+EXAMPLE = Recipe(
+    alloy="Пример: 50Ti-44Al-4,9Nb-1Mo-0,1B (задание коллеги)",
+    composition="50Ti-44Al-4.9Nb-1Mo-0.1B", basis="at",
+    additives=[Additive("C", 0.5, "at", "instead", "Ti"), Additive("Si", 0.5, "at", "instead", "Ti"),
+               Additive("CeO2", 1.2, "mol", "instead", "Ti")],
+    mode="both", target_g=1500.0, capacity_g=200.0, load_mode="full",
+    ligature_mode="computed", pure_components=["Al"],
+    notes="Задание: перевести состав в мас.% на 200 г; посчитать операции для 1,5 кг при барабане 200 г; "
+          "пересчитать с добавками 0,5 ат.% C (за счёт Ti), 0,5 Si, 1,2 CeO₂.")

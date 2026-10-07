@@ -497,6 +497,26 @@ def tab_method():
     return img
 
 
+def tab_charge():
+    """Весы с чашами — расчёт шихты (навески)."""
+    img, d = canvas()
+    d.line((8, 2, 8, 12), fill=K)            # стойка
+    d.line((3, 4, 13, 4), fill=K)            # коромысло
+    d.point((8, 2), fill=K)
+    d.line((3, 4, 1, 8), fill=D)             # подвесы
+    d.line((3, 4, 5, 8), fill=D)
+    d.line((13, 4, 11, 8), fill=D)
+    d.line((13, 4, 15, 8), fill=D)
+    d.line((1, 8, 5, 8), fill=K)             # чаши
+    d.line((11, 8, 15, 8), fill=K)
+    d.rectangle((6, 12, 10, 14), fill=S, outline=K)   # основание
+    d.point((2, 7), fill=O)                  # порошок в чашах
+    d.point((3, 7), fill=O)
+    d.point((12, 7), fill=N)
+    d.point((13, 7), fill=N)
+    return img
+
+
 def bulb32():
     """Лампочка для «Знаете ли вы…?» (как в окне приветствия Windows 95)."""
     img, d = canvas(32)
@@ -540,7 +560,7 @@ ICONS = {
     "blank": blank,
     "app": app_icon_16,
     "tab_dist": tab_dist, "tab_cmp": tab_cmp, "tab_sum": tab_sum, "tab_pop": tab_pop, "tab_tech": tab_tech,
-    "tab_surf": tab_surf, "tab_pack": tab_pack, "tab_kin": tab_kin, "tab_db": tab_db, "tab_method": tab_method,
+    "tab_surf": tab_surf, "tab_pack": tab_pack, "tab_kin": tab_kin, "tab_db": tab_db, "tab_method": tab_method, "tab_charge": tab_charge,
 }
 
 

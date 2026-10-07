@@ -399,7 +399,7 @@ class NoteBox(tk.Frame):
 class Table(tk.Frame):
     """Таблица на Treeview в вдавленной рамке: columns = [(заголовок, ширина_симв, anchor)]."""
 
-    def __init__(self, parent, columns, height=6, tree_col=None):
+    def __init__(self, parent, columns, height=6, tree_col=None, xscroll=False):
         super().__init__(parent, background=theme.FACE)
         import tkinter.font as tkfont
 
@@ -411,10 +411,31 @@ class Table(tk.Frame):
         sb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
+        if xscroll:   # много колонок (варианты шихты) — горизонтальная прокрутка
+            xb = ttk.Scrollbar(frame, orient="horizontal", command=self.tree.xview)
+            self.tree.configure(xscrollcommand=xb.set)
+            xb.pack(side="bottom", fill="x")
         self.tree.pack(fill="both", expand=True)
         f = tkfont.Font(root=self, font=theme.FONTS["ui"])
         ch = f.measure("0") + 1
         # колонка не уже своего заголовка — иначе «Медиана, мкм» обрезается до «Медиана, мк»
+        fit = lambda name, w: max(w * ch, f.measure(name) + theme.px(14))  # noqa: E731
+        if tree_col:
+            self.tree.heading("#0", text=tree_col[0])
+            self.tree.column("#0", width=fit(tree_col[0], tree_col[1]), stretch=False)
+        for i, (name, w, anchor) in enumerate(columns):
+            self.tree.heading(f"c{i}", text=name)
+            self.tree.column(f"c{i}", width=fit(name, w), anchor=anchor, stretch=(i == 0))
+
+    def set_columns(self, columns, tree_col=None):
+        """Заменить набор столбцов (таблицы с переменным числом колонок — например, варианты шихты)."""
+        import tkinter.font as tkfont
+
+        self.tree.delete(*self.tree.get_children())
+        self.tree.configure(columns=[f"c{i}" for i in range(len(columns))],
+                            show="tree headings" if tree_col else "headings")
+        f = tkfont.Font(root=self, font=theme.FONTS["ui"])
+        ch = f.measure("0") + 1
         fit = lambda name, w: max(w * ch, f.measure(name) + theme.px(14))  # noqa: E731
         if tree_col:
             self.tree.heading("#0", text=tree_col[0])

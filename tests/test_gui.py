@@ -399,3 +399,57 @@ def test_section_help_on_hover(win):
 
     assert metric("d10, мкм")[0] == "d10" and metric("15–53 мкм, %")[0] == "Доля 15–53 мкм"
     win.root.withdraw()
+
+
+def test_charge_tab(win, tmp_path):
+    """Вкладка «Шихта»: пример считается, добавка и загрузки меняют результат, экспорт и база работают."""
+    from psd_lab.core import db
+    from psd_lab.core.charge import Additive
+
+    ch = win.mod_tabs["Шихта"]
+    win.nb.select(TABS_INDEX := [win.nb.tab(i, "text").strip() for i in range(win.nb.index("end"))].index("Шихта"))
+    win.root.update()
+    assert ch.result is not None, ch.msg.cget("text")
+    assert ch.result.plan.n == 8 and len(ch.result.variants) == 5
+    rows = [ch.t_var.tree.item(i, "values") for i in ch.t_var.tree.get_children()]
+    assert rows[0][0] == "Базовый состав" and rows[0][1] == "57,91"          # Ti, мас.%
+    # навески показываются по выбранному варианту
+    ch.v_variant.set("Базовый состав")
+    ch._show(ch.result)
+    loads = {r[0]: r[1] for r in (ch.t_load.tree.item(i, "values") for i in ch.t_load.tree.get_children())}
+    assert loads["Ti"] == "115,82" and loads["B"] == "0,052"
+
+    # ошибка ввода — красным, без падения
+    ch.e_cap.delete(0, "end")
+    ch.e_cap.insert(0, "0")
+    ch.recalc()
+    assert ch.result is None and "ёмкость" in ch.msg.cget("text")
+    ch.e_cap.delete(0, "end")
+    ch.e_cap.insert(0, "200")
+    ch.recalc()
+    assert ch.result is not None
+
+    # экспорт
+    from psd_lab.core import charge_report
+
+    x = charge_report.write_xlsx(ch.result, tmp_path / "Шихта.xlsx", variant=ch._chosen(ch.result))
+    assert x.stat().st_size > 5000
+    # рецепт в файл и обратно
+    p = tmp_path / "рецепт.json"
+    import json
+
+    p.write_text(json.dumps(ch.recipe().to_json(), ensure_ascii=False), encoding="utf-8")
+    ch._adds.clear()
+    ch._fill_adds()
+    ch.recalc()
+    assert len(ch.result.variants) == 1
+    ch.open_recipe(p)
+    assert len(ch.result.variants) == 5 and ch.adds.tree.get_children()
+
+    # сохранение в карточку партии
+    bid = db.get_or_create_batch(win.db, "Тестовая партия")
+    rid = db.charge_save(win.db, ch.recipe().to_json(), "из теста", bid)
+    win.mod_tabs["База данных"].batch_id = bid
+    win.mod_tabs["База данных"]._fill_charges()
+    assert win.mod_tabs["База данных"].charge_ids == [rid]
+    _ = Additive

@@ -199,3 +199,78 @@ def test_table_input():
     close(comp.values, {"Ti": 50, "Al": 44, "Nb": 4.9, "Mo": 1, "B": 0.1}, 1e-12)
     with pytest.raises(ChargeError, match="одни единицы"):
         charge.composition_from_table([("Ti", None, "at"), ("Al", 28.7, "wt")])
+
+
+# ---------------------------------------------------------------- рецепт целиком, экспорт, база
+def test_recipe_roundtrip_and_calculate():
+    import json
+
+    r = charge.EXAMPLE
+    res = charge.calculate(r)
+    assert [v.name for v in res.variants][0] == "Базовый состав" and len(res.variants) == 5
+    assert res.plan.n == 8 and res.plan.per_load_g == 200
+    close(res.loads(res.variants[0]), {"Ti": 115.822, "Al": 57.452, "Nb": 22.031, "Mo": 4.643, "B": 0.052}, G)
+    close(res.purchase(res.variants[0]), {"Ti": 926.575, "Al": 459.615, "Nb": 176.245, "Mo": 37.147,
+                                          "B": 0.419}, G)
+    assert res.ligature.lig_pct == pytest.approx(72.093, abs=0.001)   # лигатура варианта «все вместе»
+    back = charge.Recipe.from_json(json.loads(json.dumps(r.to_json())))
+    assert back.composition == r.composition and len(back.additives) == 3
+    assert back.additives[2].component == "CeO2" and back.additives[2].unit == "mol"
+    r2 = charge.calculate(back)
+    close(r2.main.w, res.main.w, 1e-12)
+    with pytest.raises(ChargeError, match="незнакомые поля"):
+        charge.Recipe.from_json({"composition": "Ti-44Al", "неизвестное": 1})
+
+
+def test_exports(tmp_path):
+    import docx
+    from openpyxl import load_workbook
+
+    from psd_lab.core import charge_report
+
+    res = charge.calculate(charge.EXAMPLE)
+    p = charge_report.write_xlsx(res, tmp_path / "Шихта.xlsx", variant=res.variants[0])
+    wb = load_workbook(p)
+    assert wb.sheetnames == ["Состав", "Варианты", "Загрузки", "Закупка", "Лигатура", "Бланк навесок"]
+    assert wb["Состав"]["C2"].value == pytest.approx(57.9110, abs=PCT)      # мас.% Ti
+    assert wb["Состав"]["D2"].value == pytest.approx(115.822, abs=0.001)    # на 200 г
+    assert wb["Закупка"]["B2"].value == pytest.approx(926.575, abs=0.01)    # Ti на 8 загрузок
+    blank = [c.value for row in wb["Бланк навесок"].iter_rows() for c in row]
+    assert "Загрузка 1 из 8 — 200,00 г" in blank and "Фактически взвешено, г" in blank
+
+    d = charge_report.write_blank_docx(res, tmp_path / "Бланк.docx")
+    text = "\n".join(p.text for p in docx.Document(str(d)).paragraphs)
+    assert "Бланк навесок шихты" in text and "Загрузка 8 из 8" in text
+    cells = [c.text for t in docx.Document(str(d)).tables for row in t.rows for c in row.cells]
+    assert "Точность весов" in cells and "0,001 г (аналитические)" in cells
+    # одна таблица на всю партию вместо листа на загрузку
+    d2 = charge_report.write_blank_docx(res, tmp_path / "Бланк-партия.docx", per_load=False)
+    text2 = "\n".join(p.text for p in docx.Document(str(d2)).paragraphs)
+    assert "Вся партия" in text2 and "Загрузка 1 из 8" not in text2
+
+
+def test_database_recipes(tmp_path):
+    import sqlite3
+
+    from psd_lab.core import db
+
+    # старая база версии 1.0 (без таблицы рецептов) открывается без потери данных
+    f = tmp_path / "старая.sqlite"
+    con = sqlite3.connect(f)
+    con.executescript("CREATE TABLE batches(id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, alloy TEXT, "
+                      "additive TEXT, additive_wt_pct REAL, state TEXT, route TEXT, composition TEXT, "
+                      "density_measured REAL, notes TEXT);")
+    con.execute("INSERT INTO batches(name) VALUES('П/С +0,5Y2O3')")
+    con.commit()
+    con.close()
+    conn = db.connect(f)
+    assert [b["name"] for b in db.batches(conn)] == ["П/С +0,5Y2O3"]
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    bid = db.get_or_create_batch(conn, "П/С +0,5Y2O3")
+    rid = db.charge_save(conn, charge.EXAMPLE.to_json(), "Пример", bid)
+    rows = db.charge_list(conn, bid)
+    assert len(rows) == 1 and rows[0]["name"] == "Пример" and rows[0]["version"] == "1.1"
+    got = charge.Recipe.from_json(db.charge_get(conn, rid))
+    assert got.composition == charge.EXAMPLE.composition
+    db.charge_delete(conn, rid)
+    assert db.charge_list(conn, bid) == []

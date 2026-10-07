@@ -32,6 +32,7 @@ from .tabs.database import DatabaseTab
 from .dialogs.density import DensityWindow
 from .tabs.modules import PopulationsTab, SurfaceTab, TechTab
 from .tabs.method import MethodTab
+from .tabs.charge_tab import ChargeTab
 from .tabs.modules2 import KineticsTab, PackingTab
 from .tabs.placeholder import PlaceholderTab
 from .tabs.plot_panel import PlotPanel
@@ -44,7 +45,7 @@ from .widgets import (HelpTip, NoteBox, PanelTitle, ReadoutBar, StatusBar, Table
 FLAG_ICON = {"ERROR": "flag_error", "WARN": "flag_warn", "INFO": "flag_info", None: "blank"}
 TAB_ICONS = {"Распределение": "tab_dist", "Сравнение": "tab_cmp", "Сводка": "tab_sum", "Популяции": "tab_pop",
              "Технология": "tab_tech", "Поверхность": "tab_surf", "Упаковка": "tab_pack", "Кинетика": "tab_kin",
-             "База данных": "tab_db", "Методика": "tab_method"}
+             "База данных": "tab_db", "Методика": "tab_method", "Шихта": "tab_charge"}
 def _packed(w):
     w.pack(fill="x")
     return w
@@ -62,7 +63,7 @@ def open_file(path: Path):
 
 
 TABS = ["Распределение", "Сравнение", "Сводка", "Популяции", "Технология", "Поверхность", "Упаковка",
-        "Кинетика", "База данных", "Методика"]
+        "Кинетика", "Шихта", "База данных", "Методика"]
 
 
 @dataclass
@@ -162,6 +163,9 @@ class MainWindow:
         m.add_command(label="Импорт таблицы вручную…", underline=0, command=self.import_manual)
         m.add_command(label="Настроить импорт выбранного файла…", underline=2, command=self.reimport_selected)
         m.add_command(label="Сбросить ручную настройку импорта", underline=1, command=self.forget_import_settings)
+        m.add_separator()
+        m.add_command(label="Открыть рецепт шихты…", underline=8, command=self.open_charge_recipe)
+        m.add_command(label="Сохранить рецепт шихты…", underline=0, command=self.save_charge_recipe)
         self.m_recent = tk.Menu(m, tearoff=0)
         m.add_cascade(label="Последние файлы", underline=0, menu=self.m_recent)
         m.add_separator()
@@ -231,6 +235,7 @@ class MainWindow:
 
         m = tk.Menu(mb, tearoff=0)
         m.add_command(label="Настройки…", underline=0, command=self.open_settings)
+        m.add_command(label="Расчёт шихты", underline=7, command=lambda: self.nb.select(TABS.index("Шихта")))
         m.add_command(label="Плотность состава…", underline=0, command=self.open_density)
         mb.add_cascade(label="Сервис", underline=0, menu=m)
 
@@ -346,8 +351,8 @@ class MainWindow:
                                   icon=lambda lv: theme.load_icon(self.root, FLAG_ICON[lv]))
         self.mod_tabs = {"Популяции": PopulationsTab(self.nb, self), "Технология": TechTab(self.nb, self),
                          "Поверхность": SurfaceTab(self.nb, self), "Упаковка": PackingTab(self.nb, self),
-                         "Кинетика": KineticsTab(self.nb, self), "База данных": DatabaseTab(self.nb, self),
-                         "Методика": MethodTab(self.nb, self)}
+                         "Кинетика": KineticsTab(self.nb, self), "Шихта": ChargeTab(self.nb, self),
+                         "База данных": DatabaseTab(self.nb, self), "Методика": MethodTab(self.nb, self)}
         tabs = {"Распределение": dist_tab, "Сравнение": self.cmp_tab, "Сводка": self.summary, **self.mod_tabs}
         for name in TABS:
             w = tabs.get(name) or PlaceholderTab(self.nb, name)
@@ -355,9 +360,32 @@ class MainWindow:
                         underline=1 if name in tabs else -1)
         self.nb.enable_traversal()
         self.tab_help = notebook_help(self.nb, help_texts.TABS)   # справка при наведении на вкладку
+        self.nb.bind("<Configure>", self._fit_tabs, add="+")
         self.nb.bind("<<NotebookTabChanged>>", lambda e: self.refresh_tab())
         pw.add(right, weight=1)
         self.refresh_dist()
+
+    def _fit_tabs(self, _e=None):
+        """Подписи вкладок не должны обрезаться: при нехватке ширины уменьшаем отступы, затем прячем иконки."""
+        want = self.nb.winfo_width()
+        if want < 50:
+            return
+        import tkinter.font as tkfont
+
+        f = tkfont.Font(root=self.root, font=theme.FONTS["ui"])
+        text_w = sum(f.measure(f" {n}  ") for n in TABS)
+        icons = theme.icon_px() + theme.px(4)
+        for pad, with_icons in ((9, True), (6, True), (4, True), (3, False), (2, False)):
+            need = text_w + len(TABS) * (2 * theme.px(pad) + theme.px(6) + (icons if with_icons else 0))
+            if need <= want - theme.px(8) or pad == 2:
+                if (pad, with_icons) == getattr(self, "_tab_fit", None):
+                    return
+                self._tab_fit = (pad, with_icons)
+                ttk.Style(self.root).configure("TNotebook.Tab", padding=(theme.px(pad), theme.px(3)))
+                for i, name in enumerate(TABS):
+                    self.nb.tab(i, image=(theme.load_icon(self.root, TAB_ICONS[name]) if with_icons else ""),
+                                compound="left" if with_icons else "none")
+                return
 
     def _dist_toolbar(self, tb):
         cb = tk.Checkbutton(tb, text="Логарифмическая ось X", variable=self.v_dlog, command=self.on_view_option,
@@ -604,6 +632,14 @@ class MainWindow:
         self.st.import_recipes[sha or file_sha1(f)] = recipe
         self.log(f"Мастер импорта: настройка для «{f.name}» сохранена — файл будет читаться так же")
         return samples, recipe
+
+    def open_charge_recipe(self):
+        self.nb.select(TABS.index("Шихта"))
+        self.mod_tabs["Шихта"].open_recipe()
+
+    def save_charge_recipe(self):
+        self.nb.select(TABS.index("Шихта"))
+        self.mod_tabs["Шихта"].save_recipe()
 
     def import_manual(self):
         """Файл → Импорт таблицы вручную…"""
@@ -1646,6 +1682,20 @@ def run_selftest(win: MainWindow, out: Path, splash_shot: Path | None) -> int:
             shots.append(grab(root, out / f"{i + 1:02d}b_{safe_filename(name)}_до_и_после.png"))
             win.v_cmp_mode.set("all")
             win.on_cmp_mode()
+        if name == "Шихта":   # пример из задания коллеги (загружается сам) + бланк и Excel
+            ch = win.mod_tabs["Шихта"]
+            ch.refresh()
+            root.update()
+            res = ch.result
+            if res is None:
+                say("SELFTEST: ОШИБКА — шихта не посчиталась: " + ch.msg.cget("text"))
+            else:
+                from ..core import charge_report
+
+                charge_report.write_xlsx(res, out / "Шихта.xlsx")
+                charge_report.write_blank_docx(res, out / "Бланк навесок.docx")
+                say(f"SELFTEST: шихта — {res.plan.n} загрузок по {res.plan.per_load_g:g} г, "
+                    f"вариантов {len(res.variants)}; бланк и Excel сохранены")
         inner = getattr(win.mod_tabs.get(name), "nb", None)
         if inner is not None:   # вложенные вкладки модуля
             for j in range(1, len(inner.tabs())):

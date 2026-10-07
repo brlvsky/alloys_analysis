@@ -201,6 +201,22 @@ class DatabaseTab(tk.Frame):
             p = CrudPanel(self.nb, self, table)
             self.nb.add(p, text=db.TABLE_TITLES[table])
             self.panels[table] = p
+
+        # рецепты шихты (1.1)
+        ch = tk.Frame(self.nb, background=theme.FACE)
+        self.nb.add(ch, text="Шихта")
+        cbar2 = tk.Frame(ch, background=theme.FACE)
+        cbar2.pack(fill="x", pady=theme.px(4))
+        ttk.Button(cbar2, text="Открыть во вкладке «Шихта»", command=self.open_charge).pack(side="left",
+                                                                                            padx=theme.px(4))
+        ttk.Button(cbar2, text="Удалить", command=self.del_charge).pack(side="left")
+        tk.Label(cbar2, text="Рецепты сохраняются кнопкой «В карточку партии…» на вкладке «Шихта».",
+                 foreground=theme.SHADOW).pack(side="left", padx=theme.px(8))
+        self.charges = Table(ch, [("Название", 28, "w"), ("Сохранён", 18, "w"), ("Состав", 28, "w"),
+                                  ("Версия", 8, "w")], height=8)
+        self.charges.pack(fill="both", expand=True)
+        self.charges.tree.bind("<Double-Button-1>", lambda e: self.open_charge())
+        self.charge_ids: list[int] = []
         self.path_label = tk.Label(right, anchor="w", foreground=theme.SHADOW)
         self.path_label.pack(fill="x", padx=theme.px(4))
 
@@ -274,8 +290,44 @@ class DatabaseTab(tk.Frame):
                          c(m["fine_pop_pct"], 1), "; ".join(f"{lv}: {t}" for lv, t in json.loads(m["flags"] or "[]")))
                         for m in ms])
         self.mods_text.configure(text=self._summary(ms))
+        self._fill_charges()
         for p in self.panels.values():
             p.refresh()
+
+    def _fill_charges(self):
+        rows = db.charge_list(self.conn, self.batch_id) if self.batch_id else []
+        self.charge_ids = [r["id"] for r in rows]
+        self.charges.fill([(r["name"] or "рецепт", (r["created"] or "").replace("T", " "),
+                            (json.loads(r["recipe_json"]).get("composition") or ""), r["version"] or "")
+                           for r in rows])
+
+    def open_charge(self):
+        sel = self.charges.tree.selection()
+        if not sel:
+            return
+        rid = self.charge_ids[self.charges.tree.index(sel[0])]
+        from ...core.charge import Recipe
+
+        try:
+            r = Recipe.from_json(db.charge_get(self.conn, rid))
+        except ValueError as e:
+            messagebox.showerror("Шихта", f"Не удалось открыть рецепт: {e}", parent=self)
+            return
+        tab = self.app.mod_tabs["Шихта"]
+        tab.set_recipe(r)
+        from ..main_window import TABS
+
+        self.app.nb.select(TABS.index("Шихта"))
+        self.app.log(f"Шихта: открыт рецепт №{rid} из карточки партии")
+
+    def del_charge(self):
+        sel = self.charges.tree.selection()
+        if not sel:
+            return
+        rid = self.charge_ids[self.charges.tree.index(sel[0])]
+        if messagebox.askyesno("Удаление", "Удалить рецепт шихты из базы?", parent=self):
+            db.charge_delete(self.conn, rid)
+            self._fill_charges()
 
     def _summary(self, ms) -> str:
         if not ms:
