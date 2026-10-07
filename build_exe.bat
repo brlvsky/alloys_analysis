@@ -42,7 +42,7 @@ if errorlevel 1 goto fail
 echo.
 echo Готово!
 echo   Программа:          dist\PSD-Lab\PSD-Lab.exe
-echo   Архив для переноса: dist\PSD-Lab-1.0-win64.zip
+echo   Архив для переноса: dist\PSD-Lab-1.1-win64.zip
 echo   Скриншоты проверки: out\screens_exe
 start "" explorer "dist"
 pause
