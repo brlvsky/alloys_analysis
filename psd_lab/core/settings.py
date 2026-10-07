@@ -83,6 +83,9 @@ class Settings:
     reopen_session: bool = True      # открывать файлы прошлого сеанса
     session_files: list = field(default_factory=list)
     import_recipes: dict = field(default_factory=dict)  # {SHA-1 файла: ручная настройка импорта (мастер)}
+    # калькулятор шихты (1.1)
+    atomic_mass_overrides: dict = field(default_factory=dict)  # {элемент: масса} — для воспроизведения ручных расчётов
+    oxygen_warn_wt: float = 0.2      # порог предупреждения по O из оксидов, мас.% (ориентир, не норматив)
     recent_files: list = field(default_factory=list)
     last_dir: str = ""
 
